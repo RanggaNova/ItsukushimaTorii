@@ -136,7 +136,9 @@ void main() {
   }
 
   vec3 finalCol = mix(baseCol, realmCol, s3 * 0.65 + s4 * 0.35);
-  float alpha = portalMask * mix(0.08 * s1, 0.97, smoothstep(0.12, 0.75, uProgress));
+  // Smoothly dissolve portal sheet right as the camera flies physically across z = 0!
+  float camCrossFade = smoothstep(0.25, 1.65, abs(uCameraPos.z));
+  float alpha = portalMask * camCrossFade * mix(0.08 * s1, 0.97, smoothstep(0.12, 0.75, uProgress));
 
   gl_FragColor = vec4(finalCol, clamp(alpha, 0.0, 0.985));
   #include <tonemapping_fragment>
@@ -146,18 +148,17 @@ void main() {
 
 export function SupernaturalPortal() {
   const portalMeshRef = useRef<THREE.Mesh>(null);
+  const portalMatRef = useRef<THREE.ShaderMaterial>(null);
   const noiseTex = useMemo(() => getSharedNoiseTexture(), []);
 
-  const uniforms = useMemo(
-    () => ({
-      uNoiseTex: { value: noiseTex },
-      uTime: { value: 0 },
-      uProgress: { value: 0 },
-      uShockwave: { value: 0 },
-      uCameraPos: { value: new THREE.Vector3() },
-    }),
-    [noiseTex]
-  );
+  const uniformsRef = useRef({
+    uNoiseTex: { value: noiseTex },
+    uTime: { value: 0 },
+    uProgress: { value: 0 },
+    uShockwave: { value: 0 },
+    uCameraPos: { value: new THREE.Vector3() },
+  });
+  uniformsRef.current.uNoiseTex.value = noiseTex;
 
   // Enable Layer 1 so Planar Reflection FBO reflects the glowing portal on the swirling sea!
   useEffect(() => {
@@ -167,10 +168,17 @@ export function SupernaturalPortal() {
   }, []);
 
   useFrame(({ clock, camera }) => {
-    uniforms.uTime.value = clock.getElapsedTime();
-    uniforms.uProgress.value = experienceState.portalProgress;
-    uniforms.uShockwave.value = experienceState.clickShockwave;
-    uniforms.uCameraPos.value.copy(camera.position);
+    const isVisible = experienceState.portalProgress > 0.002 && camera.position.z > -1.2;
+    if (portalMeshRef.current) {
+      portalMeshRef.current.visible = isVisible;
+    }
+    if (!isVisible) return;
+
+    const u = portalMatRef.current ? portalMatRef.current.uniforms : uniformsRef.current;
+    u.uTime.value = clock.getElapsedTime();
+    u.uProgress.value = experienceState.portalProgress;
+    u.uShockwave.value = experienceState.clickShockwave;
+    u.uCameraPos.value.copy(camera.position);
   });
 
   return (
@@ -183,9 +191,10 @@ export function SupernaturalPortal() {
     >
       <planeGeometry args={[4.68, 4.24, 32, 32]} />
       <shaderMaterial
+        ref={portalMatRef}
         vertexShader={portalVertexShader}
         fragmentShader={portalFragmentShader}
-        uniforms={uniforms}
+        uniforms={uniformsRef.current}
         transparent
         depthWrite={false}
         side={THREE.DoubleSide}

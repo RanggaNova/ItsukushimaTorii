@@ -4,8 +4,8 @@ import * as THREE from 'three';
 import { experienceState } from '../state/experienceState';
 import { getMistCloudSpriteTexture } from '../utils/proceduralTextures';
 
-// 260 pre-baked cloud sprites = silky 60-120 FPS with rich volumetric coverage & zero 3D-noise lag!
-const MIST_COUNT = 260;
+// 165 pre-baked cloud sprites = silky 60-120 FPS with rich volumetric coverage & minimal overdraw!
+const MIST_COUNT = 165;
 const PORTAL_CENTER = new THREE.Vector3(0, 2.05, 0);
 
 const mistVertexShader = /* glsl */ `
@@ -92,10 +92,18 @@ interface ParticleCPU {
 }
 
 export function VolumetricMist() {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const matRef = useRef<THREE.ShaderMaterial>(null);
   const geomRef = useRef<THREE.InstancedBufferGeometry>(null);
   const cloudTex = useMemo(() => getMistCloudSpriteTexture(), []);
+  const uniformsRef = useRef({
+    uCloudTex: { value: cloudTex },
+    uPortalProgress: { value: 0 },
+    uShockwave: { value: 0 },
+  });
+  uniformsRef.current.uCloudTex.value = cloudTex;
 
-  const { particles, offsetArray, metaArray, uniforms } = useMemo(() => {
+  const { particles, offsetArray, metaArray } = useMemo(() => {
     const list: ParticleCPU[] = [];
     const offsets = new Float32Array(MIST_COUNT * 3);
     const metas = new Float32Array(MIST_COUNT * 4);
@@ -166,25 +174,26 @@ export function VolumetricMist() {
       metas[i * 4 + 3] = seed;
     }
 
-    const u = {
-      uCloudTex: { value: cloudTex },
-      uPortalProgress: { value: 0 },
-      uShockwave: { value: 0 },
-    };
-
-    return { particles: list, offsetArray: offsets, metaArray: metas, uniforms: u };
-  }, [cloudTex]);
+    return { particles: list, offsetArray: offsets, metaArray: metas };
+  }, []);
 
   const baseQuad = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
 
   useFrame(({ clock }, delta) => {
+    const showMist = experienceState.travelProgress < 0.78;
+    if (meshRef.current) {
+      meshRef.current.visible = showMist;
+    }
+    if (!showMist) return;
+
     const dt = Math.min(delta, 0.05);
     const t = clock.getElapsedTime();
     const prog = experienceState.portalProgress;
     const vel = experienceState.portalVelocity;
 
-    uniforms.uPortalProgress.value = prog;
-    uniforms.uShockwave.value = experienceState.clickShockwave;
+    const u = matRef.current ? matRef.current.uniforms : uniformsRef.current;
+    u.uPortalProgress.value = prog;
+    u.uShockwave.value = experienceState.clickShockwave;
 
     const suction = THREE.MathUtils.smoothstep(prog, 0.01, 0.92);
     const isClosing = vel < -0.02 && !experienceState.isPortalOpenTarget;
@@ -273,7 +282,7 @@ export function VolumetricMist() {
   });
 
   return (
-    <mesh frustumCulled={false} renderOrder={3} raycast={() => null} name="VolumetricMistParticles">
+    <mesh ref={meshRef} frustumCulled={false} renderOrder={3} raycast={() => null} name="VolumetricMistParticles">
       <instancedBufferGeometry
         ref={geomRef}
         index={baseQuad.index}
@@ -293,9 +302,10 @@ export function VolumetricMist() {
         />
       </instancedBufferGeometry>
       <shaderMaterial
+        ref={matRef}
         vertexShader={mistVertexShader}
         fragmentShader={mistFragmentShader}
-        uniforms={uniforms}
+        uniforms={uniformsRef.current}
         transparent
         depthWrite={false}
         blending={THREE.NormalBlending}

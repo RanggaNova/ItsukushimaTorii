@@ -20,6 +20,7 @@ uniform sampler2D uNoiseTex;
 uniform float uTime;
 uniform float uPortalProgress;
 uniform float uShockwave;
+uniform vec4 uSeasonWeights; // x: haru, y: natsu, z: aki, w: fuyu
 
 varying vec3 vDir;
 
@@ -28,10 +29,26 @@ void main() {
   float h = clamp(dir.y, -0.25, 1.0);
   float upH = clamp(dir.y, 0.0, 1.0);
 
-  // Calm state: Moody, poetic Japanese twilight-silver mist (richer depth, not washed-out white!)
-  vec3 calmHorizon = vec3(0.585, 0.645, 0.705);
-  vec3 calmMid     = vec3(0.390, 0.465, 0.560);
-  vec3 calmZenith  = vec3(0.235, 0.305, 0.410);
+  // 4-Season Atmospheric Sky Palettes (Haru / Natsu / Aki / Fuyu)
+  vec3 haruHoriz  = vec3(0.640, 0.590, 0.655);
+  vec3 haruMid    = vec3(0.455, 0.445, 0.545);
+  vec3 haruZenith = vec3(0.275, 0.295, 0.415);
+
+  vec3 natsuHoriz  = vec3(0.540, 0.650, 0.715);
+  vec3 natsuMid    = vec3(0.320, 0.470, 0.590);
+  vec3 natsuZenith = vec3(0.165, 0.305, 0.455);
+
+  vec3 akiHoriz  = vec3(0.685, 0.545, 0.445);
+  vec3 akiMid    = vec3(0.485, 0.385, 0.415);
+  vec3 akiZenith = vec3(0.245, 0.235, 0.335);
+
+  vec3 fuyuHoriz  = vec3(0.585, 0.645, 0.705);
+  vec3 fuyuMid    = vec3(0.405, 0.475, 0.560);
+  vec3 fuyuZenith = vec3(0.255, 0.320, 0.415);
+
+  vec3 calmHorizon = haruHoriz * uSeasonWeights.x + natsuHoriz * uSeasonWeights.y + akiHoriz * uSeasonWeights.z + fuyuHoriz * uSeasonWeights.w;
+  vec3 calmMid     = haruMid   * uSeasonWeights.x + natsuMid   * uSeasonWeights.y + akiMid   * uSeasonWeights.z + fuyuMid   * uSeasonWeights.w;
+  vec3 calmZenith  = haruZenith* uSeasonWeights.x + natsuZenith* uSeasonWeights.y + akiZenith* uSeasonWeights.z + fuyuZenith* uSeasonWeights.w;
 
   // Supernatural open state: Deep abyssal midnight-indigo & nocturnal ink mist
   vec3 darkHorizon = vec3(0.0020, 0.0042, 0.0105);
@@ -66,7 +83,12 @@ void main() {
                    + pow(sunAlign, 420.0) * 0.42;
   float cloudShroud = 0.52 + 0.48 * n1.r;
 
-  vec3 calmSunGlow = vec3(0.95, 0.88, 0.78) * veiledDisc * (0.75 + 0.25 * n1.r);
+  vec3 seasonSunTint =
+      vec3(1.00, 0.86, 0.84) * uSeasonWeights.x
+    + vec3(1.00, 0.94, 0.80) * uSeasonWeights.y
+    + vec3(1.05, 0.72, 0.46) * uSeasonWeights.z
+    + vec3(0.86, 0.92, 1.00) * uSeasonWeights.w;
+  vec3 calmSunGlow = seasonSunTint * veiledDisc * (0.75 + 0.25 * n1.r);
   vec3 darkMoonGlow = vec3(0.11, 0.16, 0.28) * lunarHalo * cloudShroud;
   skyCol += mix(calmSunGlow, darkMoonGlow, atmMix);
 
@@ -126,14 +148,12 @@ void main() {
 export function SkyAtmosphere() {
   const { gl, scene } = useThree();
   const skyMeshRef = useRef<THREE.Mesh>(null);
+  const skyMatRef = useRef<THREE.ShaderMaterial>(null);
 
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const keySunRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
-  const seaBounceRef = useRef<THREE.PointLight>(null);
-  const portalFrontLightRef = useRef<THREE.PointLight>(null);
-  const portalBackLightRef = useRef<THREE.PointLight>(null);
-  const portalSeaGlowRef = useRef<THREE.PointLight>(null);
+  const dynamicSanctuaryLightRef = useRef<THREE.PointLight>(null);
 
   const noiseTex = useMemo(() => getSharedNoiseTexture(), []);
 
@@ -147,25 +167,43 @@ export function SkyAtmosphere() {
     };
   }, [gl, scene]);
 
-  const uniforms = useMemo(
-    () => ({
-      uNoiseTex: { value: noiseTex },
-      uTime: { value: 0 },
-      uPortalProgress: { value: 0 },
-      uShockwave: { value: 0 },
-    }),
-    [noiseTex]
-  );
+  const uniformsRef = useRef({
+    uNoiseTex: { value: noiseTex },
+    uTime: { value: 0 },
+    uPortalProgress: { value: 0 },
+    uShockwave: { value: 0 },
+    uSeasonWeights: { value: new THREE.Vector4(1, 0, 0, 0) },
+  });
+  uniformsRef.current.uNoiseTex.value = noiseTex;
 
   useEffect(() => {
     if (skyMeshRef.current) {
       skyMeshRef.current.layers.enable(1);
     }
+    // Bake static architectural shadow map ONCE (Torii & Sun position are static -> massive FPS boost!)
+    if (keySunRef.current) {
+      keySunRef.current.shadow.autoUpdate = false;
+      keySunRef.current.shadow.needsUpdate = true;
+      const timer = window.setTimeout(() => {
+        if (keySunRef.current) keySunRef.current.shadow.needsUpdate = true;
+      }, 600);
+      return () => window.clearTimeout(timer);
+    }
   }, []);
 
-  const calmFogCol = useMemo(() => new THREE.Color('#c8d3dd'), []);
+  const haruFogCol = useMemo(() => new THREE.Color('#d2c8d2'), []);
+  const natsuFogCol = useMemo(() => new THREE.Color('#bdd0da'), []);
+  const akiFogCol = useMemo(() => new THREE.Color('#d4beae'), []);
+  const fuyuFogCol = useMemo(() => new THREE.Color('#c8d3dd'), []);
+  const calmFogCol = useMemo(() => new THREE.Color('#d2c8d2'), []);
   const darkFogCol = useMemo(() => new THREE.Color('#050a14'), []);
-  const workFogCol = useMemo(() => new THREE.Color('#c8d3dd'), []);
+  const workFogCol = useMemo(() => new THREE.Color('#d2c8d2'), []);
+
+  const haruSunCol = useMemo(() => new THREE.Color('#ffe8de'), []);
+  const natsuSunCol = useMemo(() => new THREE.Color('#fff4dc'), []);
+  const akiSunCol = useMemo(() => new THREE.Color('#ffcb90'), []);
+  const fuyuSunCol = useMemo(() => new THREE.Color('#e6f2ff'), []);
+  const workSunCol = useMemo(() => new THREE.Color('#ffe8de'), []);
 
   const calmSkyLight = useMemo(() => new THREE.Color('#dbe7f4'), []);
   const darkSkyLight = useMemo(() => new THREE.Color('#12223d'), []);
@@ -184,9 +222,24 @@ export function SkyAtmosphere() {
     const p = experienceState.portalProgress;
     const shock = experienceState.clickShockwave;
 
-    uniforms.uTime.value = t;
-    uniforms.uPortalProgress.value = p;
-    uniforms.uShockwave.value = shock;
+    const sw = experienceState.seasonWeights;
+    const u = skyMatRef.current ? skyMatRef.current.uniforms : uniformsRef.current;
+    u.uTime.value = t;
+    u.uPortalProgress.value = p;
+    u.uShockwave.value = shock;
+    u.uSeasonWeights.value.copy(sw);
+
+    // Blend seasonal fog & sunlight colors smoothly
+    calmFogCol.setRGB(
+      haruFogCol.r * sw.x + natsuFogCol.r * sw.y + akiFogCol.r * sw.z + fuyuFogCol.r * sw.w,
+      haruFogCol.g * sw.x + natsuFogCol.g * sw.y + akiFogCol.g * sw.z + fuyuFogCol.g * sw.w,
+      haruFogCol.b * sw.x + natsuFogCol.b * sw.y + akiFogCol.b * sw.z + fuyuFogCol.b * sw.w
+    );
+    workSunCol.setRGB(
+      haruSunCol.r * sw.x + natsuSunCol.r * sw.y + akiSunCol.r * sw.z + fuyuSunCol.r * sw.w,
+      haruSunCol.g * sw.x + natsuSunCol.g * sw.y + akiSunCol.g * sw.z + fuyuSunCol.g * sw.w,
+      haruSunCol.b * sw.x + natsuSunCol.b * sw.y + akiSunCol.b * sw.z + fuyuSunCol.b * sw.w
+    );
 
     const atmMix = THREE.MathUtils.smoothstep(p, 0.06, 0.96);
 
@@ -211,6 +264,7 @@ export function SkyAtmosphere() {
     }
 
     if (keySunRef.current) {
+      keySunRef.current.color.copy(workSunCol);
       keySunRef.current.intensity = THREE.MathUtils.lerp(3.4, 0.34, atmMix);
     }
 
@@ -220,63 +274,61 @@ export function SkyAtmosphere() {
       rimLightRef.current.intensity = THREE.MathUtils.lerp(1.85, 1.65, atmMix);
     }
 
-    if (seaBounceRef.current) {
-      seaBounceRef.current.intensity =
-        THREE.MathUtils.lerp(3.2, 1.35, atmMix) * (0.9 + 0.1 * Math.sin(t * 2.1));
-    }
-
-    // Supernatural Portal Core Lights (Ghostly Moonlit Indigo & Spectral Violet-Blue)
-    const portalGlow = THREE.MathUtils.smoothstep(p, 0.22, 1.0);
-    const pulse = 1.0 + Math.sin(t * 2.0) * 0.07 + shock * 1.15;
-
-    if (portalFrontLightRef.current) {
-      portalFrontLightRef.current.intensity = portalGlow * 26.0 * pulse;
-    }
-    if (portalBackLightRef.current) {
-      portalBackLightRef.current.intensity = portalGlow * 22.0 * pulse;
-    }
-    if (portalSeaGlowRef.current) {
-      portalSeaGlowRef.current.intensity = portalGlow * 15.0 * pulse;
+    // Unified Dynamic Sanctuary PointLight (Replaces 4 separate PointLights -> huge PBR shader speedup!)
+    if (dynamicSanctuaryLightRef.current) {
+      const portalGlow = THREE.MathUtils.smoothstep(p, 0.22, 1.0);
+      const pulse = 1.0 + Math.sin(t * 2.0) * 0.07 + shock * 1.15;
+      dynamicSanctuaryLightRef.current.intensity = THREE.MathUtils.lerp(
+        3.0,
+        24.0 * pulse,
+        portalGlow
+      );
+      dynamicSanctuaryLightRef.current.color.setRGB(
+        THREE.MathUtils.lerp(0.62, 0.24, portalGlow),
+        THREE.MathUtils.lerp(0.78, 0.42, portalGlow),
+        THREE.MathUtils.lerp(0.91, 0.85, portalGlow)
+      );
     }
   });
 
   return (
     <>
       <mesh ref={skyMeshRef} scale={[260, 260, 260]} frustumCulled={false} raycast={() => null} name="SkyDome">
-        <sphereGeometry args={[1, 40, 28]} />
+        <sphereGeometry args={[1, 36, 24]} />
         <shaderMaterial
+          ref={skyMatRef}
           vertexShader={skyVertexShader}
           fragmentShader={skyFragmentShader}
-          uniforms={uniforms}
+          uniforms={uniformsRef.current}
           side={THREE.BackSide}
           depthWrite={false}
           fog={false}
         />
       </mesh>
 
-      {/* Restrained Atmospheric Hemisphere (preserves deep shadow contrast on cylinders & beams!) */}
+      {/* Restrained Atmospheric Hemisphere */}
       <hemisphereLight ref={hemiRef} args={['#dbe7f4', '#3a4a58', 0.85]} />
 
-      {/* Dramatic Asymmetric Key Light with Real 2048x2048 Soft Architectural Shadows! */}
+      {/* Dramatic Asymmetric Key Light with Static-Baked 1024x1024 Architectural Shadow Map */}
       <directionalLight
         ref={keySunRef}
         position={[-15, 13, 14]}
         intensity={3.4}
         color="#ffeed8"
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
         shadow-camera-near={4}
         shadow-camera-far={42}
         shadow-camera-left={-8.5}
         shadow-camera-right={8.5}
         shadow-camera-top={9.5}
         shadow-camera-bottom={-2.5}
-        shadow-bias={-0.0004}
+        shadow-bias={-0.0005}
         shadow-normalBias={0.02}
       />
 
-      {/* Mystical Cool-Silver / Aurora-Emerald Kicker Rim Light from Opposite Rear-Right */}
+      {/* Mystical Cool-Silver / Moonlit-Indigo Kicker Rim Light */}
       <directionalLight
         ref={rimLightRef}
         position={[16, 10, -14]}
@@ -284,40 +336,14 @@ export function SkyAtmosphere() {
         color="#b8d8ff"
       />
 
-      {/* Shimmering Sea-Surface Bounce Light under the Torii Eaves & Plaque */}
+      {/* Single Unified Sea-Bounce & Portal Sanctuary Light */}
       <pointLight
-        ref={seaBounceRef}
-        position={[0, 0.9, 4.2]}
+        ref={dynamicSanctuaryLightRef}
+        position={[0, 1.85, 1.8]}
         color="#9ec8e8"
-        distance={14}
-        decay={1.7}
-        intensity={3.2}
-      />
-
-      {/* Supernatural Portal Core Lights (Ghostly Moonlit Indigo, Slate-Blue & Phantom Violet) */}
-      <pointLight
-        ref={portalFrontLightRef}
-        position={[0, 2.15, 1.15]}
-        color="#3b66d4"
-        distance={24}
-        decay={1.6}
-        intensity={0}
-      />
-      <pointLight
-        ref={portalBackLightRef}
-        position={[0, 2.15, -1.15]}
-        color="#31688a"
-        distance={24}
-        decay={1.6}
-        intensity={0}
-      />
-      <pointLight
-        ref={portalSeaGlowRef}
-        position={[0, 0.65, 1.9]}
-        color="#5242b0"
-        distance={18}
-        decay={1.7}
-        intensity={0}
+        distance={22}
+        decay={1.65}
+        intensity={3.0}
       />
     </>
   );

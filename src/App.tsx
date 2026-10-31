@@ -6,6 +6,8 @@ import { AtmosphericScenery } from './components/AtmosphericScenery';
 import { ToriiGate } from './components/ToriiGate';
 import { SupernaturalPortal } from './components/SupernaturalPortal';
 import { VolumetricMist } from './components/VolumetricMist';
+import { SeasonalParticles } from './components/SeasonalParticles';
+import { KakuriyoSanctuary } from './components/KakuriyoSanctuary';
 import { InteractiveOcean } from './components/InteractiveOcean';
 import { CameraRig } from './components/CameraRig';
 import { MinimalUI } from './components/MinimalUI';
@@ -26,6 +28,8 @@ function SceneContent({ onLoaded }: { onLoaded: () => void }) {
       <ToriiGate />
       <SupernaturalPortal />
       <VolumetricMist />
+      <SeasonalParticles />
+      <KakuriyoSanctuary />
       <InteractiveOcean />
     </>
   );
@@ -35,8 +39,19 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && experienceState.isPortalOpenTarget) {
+        experienceState.returnToUtsushiyo();
+        soundEngine.triggerDimensionalPulse();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>) => {
-    if ((e.target as HTMLElement)?.closest('button')) {
+    if ((e.target as HTMLElement)?.closest('[data-ui-interactive="true"], button, input, textarea, form')) {
       pointerDownRef.current = null;
       return;
     }
@@ -46,7 +61,7 @@ export default function App() {
 
   const handlePointerUp = (e: React.PointerEvent<HTMLElement>) => {
     if (!pointerDownRef.current) return;
-    if ((e.target as HTMLElement)?.closest('button')) {
+    if ((e.target as HTMLElement)?.closest('[data-ui-interactive="true"], button, input, textarea, form')) {
       pointerDownRef.current = null;
       return;
     }
@@ -56,10 +71,22 @@ export default function App() {
     );
     pointerDownRef.current = null;
 
-    // 1x Click Toggle: 1 click enters dark mystical mode, 1 click returns to calm misty daylight
-    if (moveDist < 12) {
-      experienceState.togglePortalMode();
+    if (moveDist >= 12) return;
+
+    if (!experienceState.isPortalOpenTarget) {
+      // In Utsushiyo: 1x click awakens the portal & glides camera through the Torii Gate!
+      experienceState.enterKakuriyo();
       soundEngine.triggerDimensionalPulse();
+    } else if (experienceState.travelProgress > 0.78) {
+      // Inside Kakuriyo: clicking on the sea releases a glowing Tōrō water lantern!
+      const lx = experienceState.hasWaterHit
+        ? experienceState.waterHitPoint.x
+        : ((e.clientX / Math.max(1, window.innerWidth)) * 2 - 1) * 9.5;
+      const lz = experienceState.hasWaterHit
+        ? experienceState.waterHitPoint.z
+        : -20.0;
+      experienceState.spawnUserLantern(lx, lz, false);
+      soundEngine.triggerLanternBell(false);
     }
   };
 
@@ -78,8 +105,8 @@ export default function App() {
       <MinimalUI ready={ready} />
 
       <Canvas
-        shadows="soft"
-        dpr={[1, 1.5]}
+        shadows
+        dpr={[1, 1.35]}
         camera={{ position: [0, 2.75, 19.5], fov: 42, near: 0.1, far: 450 }}
         gl={{
           antialias: true,

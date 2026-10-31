@@ -157,6 +157,7 @@ void main() {
 
 export function ToriiGate() {
   const { scene } = useGLTF('/models/itsukushima_torii.glb');
+  const assemblyRef = useRef<THREE.Group>(null);
   const shimenawaRef = useRef<THREE.Mesh>(null);
   const shideRef = useRef<THREE.Mesh>(null);
 
@@ -166,6 +167,7 @@ export function ToriiGate() {
       uPortalProgress: { value: 0 },
       uGateHover: { value: 0 },
       uShockwave: { value: 0 },
+      uWinterMix: { value: 0 },
       uCameraPos: { value: new THREE.Vector3() },
     }),
     []
@@ -261,6 +263,7 @@ export function ToriiGate() {
         shader.uniforms.uPortalProgress = sharedShaderUniforms.uPortalProgress;
         shader.uniforms.uGateHover = sharedShaderUniforms.uGateHover;
         shader.uniforms.uShockwave = sharedShaderUniforms.uShockwave;
+        shader.uniforms.uWinterMix = sharedShaderUniforms.uWinterMix;
         shader.uniforms.uCameraPos = sharedShaderUniforms.uCameraPos;
 
         shader.vertexShader = shader.vertexShader
@@ -291,6 +294,7 @@ export function ToriiGate() {
             uniform float uPortalProgress;
             uniform float uGateHover;
             uniform float uShockwave;
+            uniform float uWinterMix;
             uniform vec3 uCameraPos;
             varying vec3 vToriiWorldPos;
             varying vec3 vToriiWorldNormal;
@@ -314,6 +318,15 @@ export function ToriiGate() {
             float jointDistR  = length(vec2(vToriiWorldPos.x - 2.75, (vToriiWorldPos.y - 4.4) * 0.7));
             float jointAO     = 1.0 - 0.25 * (exp(-jointDistL * 2.5) + exp(-jointDistR * 2.5));
             diffuseColor.rgb *= clamp(underRoofAO * underNukiAO * jointAO, 0.38, 1.0);
+
+            // 3. Winter (Fuyu) Crystalline Snow Accumulation on Curved Copper Roofs & Top Beams!
+            if (uWinterMix > 0.005) {
+              float snowFacing = smoothstep(0.42, 0.85, vToriiWorldNormal.y);
+              float aboveWaves = smoothstep(1.4, 2.2, vToriiWorldPos.y);
+              float snowNoise  = 0.82 + 0.18 * sin(vToriiWorldPos.x * 7.5 + vToriiWorldPos.z * 9.0);
+              float snowMask   = clamp(snowFacing * aboveWaves * snowNoise * uWinterMix, 0.0, 0.92);
+              diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.95, 0.99), snowMask);
+            }
             `
           )
           .replace(
@@ -394,11 +407,19 @@ export function ToriiGate() {
   }, []);
 
   useFrame(({ clock, camera }) => {
+    const isInFrontOfTorii = camera.position.z > -1.2;
+    if (assemblyRef.current) {
+      assemblyRef.current.visible = isInFrontOfTorii;
+    }
+    if (!isInFrontOfTorii) return;
+
     const t = clock.getElapsedTime();
     sharedShaderUniforms.uTime.value = t;
     sharedShaderUniforms.uPortalProgress.value = experienceState.portalProgress;
     sharedShaderUniforms.uGateHover.value = experienceState.gateHoverBlend;
     sharedShaderUniforms.uShockwave.value = experienceState.clickShockwave;
+    sharedShaderUniforms.uWinterMix.value =
+      experienceState.seasonWeights.w * (1.0 - experienceState.portalProgress * 0.65);
     sharedShaderUniforms.uCameraPos.value.copy(camera.position);
 
     shideUniforms.uTime.value = t;
@@ -413,7 +434,7 @@ export function ToriiGate() {
   };
 
   return (
-    <group name="ToriiAssembly">
+    <group ref={assemblyRef} name="ToriiAssembly">
       {/* Batched 6-Pillar Itsukushima O-Torii with Real Shadows, Cavity AO, Fresnel Rim & Caustics */}
       <primitive object={batchedToriiGroup} position={[0, TORII_BASE_Y, 0]} />
 

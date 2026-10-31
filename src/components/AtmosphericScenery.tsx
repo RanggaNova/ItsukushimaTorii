@@ -9,14 +9,17 @@ import { getSharedNoiseTexture } from '../utils/proceduralTextures';
 // ============================================================================
 const mountainVertexShader = /* glsl */ `
 attribute float aLayer;
+attribute float aRidge; // 0 = valley/gully, 1 = sharp alpine spur/crest
 varying float vHeight;
 varying float vLayer;
+varying float vRidge;
 varying vec3 vWorldPos;
 varying vec3 vNormalW;
 
 void main() {
   vHeight = position.y;
   vLayer = aLayer;
+  vRidge = aRidge;
   vNormalW = normalize(mat3(modelMatrix) * normal);
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorldPos = wp.xyz;
@@ -25,47 +28,133 @@ void main() {
 `;
 
 const mountainFragmentShader = /* glsl */ `
+uniform sampler2D uNoiseTex;
 uniform float uPortalProgress;
 uniform float uTime;
+uniform vec4 uSeasonWeights; // x: haru, y: natsu, z: aki, w: fuyu
 
 varying float vHeight;
 varying float vLayer;
+varying float vRidge;
 varying vec3 vWorldPos;
 varying vec3 vNormalW;
 
 void main() {
   float atmMix = smoothstep(0.06, 0.96, uPortalProgress);
+  vec3 geomN = normalize(vNormalW);
+  vec3 viewDir = normalize(cameraPosition - vWorldPos);
 
-  // Sumi-e ink-wash coastal mountain layers matched to moody twilight-silver mist
-  vec3 calmNear = vec3(0.095, 0.135, 0.175);
-  vec3 calmMid  = vec3(0.205, 0.265, 0.325);
-  vec3 calmFar  = vec3(0.355, 0.425, 0.495);
+  // 1. Multi-Scale Procedural Rock Strata, Vertical Cliff Fissures & Cedar Forest Canopy
+  vec2 uvMacro  = vec2(vWorldPos.x * 0.014 + vWorldPos.z * 0.011, vHeight * 0.045);
+  vec2 uvStrata = vec2(vWorldPos.x * 0.038 - vWorldPos.z * 0.032, vHeight * 0.195);
+  vec2 uvCrag   = vec2(vWorldPos.x * 0.115 + vWorldPos.z * 0.095, vHeight * 0.140);
+  vec2 uvCanopy = vWorldPos.xz * 0.085;
 
-  vec3 darkNear = vec3(0.0014, 0.0030, 0.0072);
-  vec3 darkMid  = vec3(0.0020, 0.0044, 0.0105);
-  vec3 darkFar  = vec3(0.0026, 0.0058, 0.0135);
+  vec4 nMacro  = texture2D(uNoiseTex, uvMacro);
+  vec4 nStrata = texture2D(uNoiseTex, uvStrata);
+  vec4 nCrag   = texture2D(uNoiseTex, uvCrag);
+  vec4 nCanopy = texture2D(uNoiseTex, uvCanopy);
 
-  vec3 calmBase = vLayer < 0.5 ? calmNear : (vLayer < 1.5 ? calmMid : calmFar);
-  vec3 darkBase = vLayer < 0.5 ? darkNear : (vLayer < 1.5 ? darkMid : darkFar);
+  // Slope factor: steep cliffs expose striated granite rock; gentler slopes hold dense pine/cedar forest!
+  float steepness = 1.0 - clamp(geomN.y, 0.0, 1.0);
+  float rockMask = smoothstep(0.28, 0.62, steepness + vRidge * 0.24 + (nMacro.r - 0.5) * 0.22);
+
+  // High-frequency normal perturbation: horizontal cliff strata + vertical erosion gullies + forest bumps
+  vec3 rockPerturb = vec3(
+    (nCrag.r - 0.5) * 0.85 + (nStrata.r - 0.5) * 0.55,
+    (nStrata.b - 0.5) * 0.52,
+    (nCrag.g - 0.5) * 0.85 + (nStrata.g - 0.5) * 0.55
+  );
+  vec3 forestPerturb = vec3(
+    (nCanopy.r - 0.5) * 0.55,
+    (nCanopy.b - 0.5) * 0.35,
+    (nCanopy.g - 0.5) * 0.55
+  );
+  vec3 N = normalize(geomN + mix(forestPerturb, rockPerturb, rockMask));
+
+  // Sedimentary rock bands & fissure crevices (ambient occlusion inside gullies!)
+  float strataBands = smoothstep(0.22, 0.82, sin(vHeight * 2.35 + nMacro.g * 5.0) * 0.5 + 0.5);
+  float fissureAO = (0.48 + 0.52 * smoothstep(0.08, 0.85, vRidge)) * (0.72 + 0.28 * nCrag.b);
+  float rockAlbedoTex = mix(0.62, 1.18, strataBands * 0.55 + nStrata.b * 0.45);
+  float canopyTex = 0.68 + 0.45 * nCanopy.g;
+
+  // 2. Utsushiyo (Seasonal Daylight): Forested Sumi-e Slopes + Craggy Exposed Cliff Faces
+  vec3 forestTint =
+      vec3(0.085, 0.135, 0.145) * uSeasonWeights.x
+    + vec3(0.062, 0.148, 0.132) * uSeasonWeights.y
+    + vec3(0.155, 0.098, 0.072) * uSeasonWeights.z
+    + vec3(0.088, 0.122, 0.152) * uSeasonWeights.w;
+  vec3 cliffTint = vec3(0.165, 0.188, 0.225) * rockAlbedoTex;
+
+  vec3 calmSurface = mix(forestTint * canopyTex, cliffTint, rockMask) * fissureAO;
+  // Aerial perspective across the 3 island mountain rings in daylight
+  vec3 calmHazeTint = vec3(0.34, 0.40, 0.47);
+  vec3 calmBase = mix(calmSurface, calmHazeTint, vLayer * 0.28);
+
+  // Crisp snow accumulation on ridges & ledges in Winter (Fuyu)
+  float winterSnow = smoothstep(3.8, 12.0, vHeight + nMacro.b * 2.5)
+                   * smoothstep(0.28, 0.72, N.y + vRidge * 0.25)
+                   * uSeasonWeights.w * (1.0 - atmMix);
+  calmBase = mix(calmBase, vec3(0.82, 0.88, 0.95), winterSnow * 0.82);
+
+  // 3. Kakuriyo (Dark Mode): Deep Obsidian-Indigo Shadowed Valleys vs Moonlit Slate-Granite Crags!
+  vec3 darkForest = vec3(0.0032, 0.0068, 0.0145) * canopyTex;
+  vec3 darkCliff  = vec3(0.0085, 0.0155, 0.0310) * rockAlbedoTex;
+  vec3 darkBase   = mix(darkForest, darkCliff, rockMask) * fissureAO;
+
   vec3 col = mix(calmBase, darkBase, atmMix);
 
-  // Directional mist-sun highlight on left mountain slopes + Aurora Borealis rim in dark mode
-  float ridgeUp = clamp(vNormalW.y, 0.0, 1.0);
-  float sunSlope = clamp(dot(vNormalW, normalize(vec3(-0.6, 0.5, 0.4))), 0.0, 1.0);
-  col += vec3(0.065, 0.068, 0.072) * sunSlope * (1.0 - atmMix) * (1.0 - vLayer * 0.3);
+  // 4. DRAMATIC LOW-ANGLE RAKING CHIAROSCURO LIGHTING (Sharp sunlit/moonlit spurs vs deep shadowed gorges!)
+  vec3 sunDir = normalize(vec3(-0.82, 0.36, 0.22));
+  float sunGrazing = pow(clamp(dot(N, sunDir), 0.0, 1.0), 1.25);
+  col += vec3(0.135, 0.132, 0.128) * sunGrazing * fissureAO * (1.0 - atmMix) * (1.0 - vLayer * 0.24);
 
-  float auroraRim = smoothstep(2.5, 16.0, vHeight) * pow(ridgeUp, 0.7) * smoothstep(0.22, 1.0, uPortalProgress);
-  float auroraWave = 0.65 + 0.35 * sin(vWorldPos.x * 0.05 + uTime * 0.25);
-  col += mix(vec3(0.005, 0.022, 0.036), vec3(0.012, 0.010, 0.038), vLayer * 0.45) * auroraRim * auroraWave;
+  // Low-angle raking Oborozuki Moonlight from left-horizon carves stark 3D ridge-vs-ravine contrast!
+  vec3 moonDir = normalize(vec3(-0.88, 0.27, 0.18));
+  float rawMoonDot = clamp(dot(N, moonDir), 0.0, 1.0);
+  // Mask direct moonlight slightly inside deep ravines (vRidge) to simulate mountain self-shadowing!
+  float selfShadow = smoothstep(0.12, 0.68, vRidge + rawMoonDot * 0.35);
+  float moonRaking = pow(rawMoonDot, 1.35) * selfShadow;
 
-  // Valley mist hugging island bases so mountains float seamlessly in sea fog
-  vec3 calmMist = vec3(0.585, 0.645, 0.705);
-  vec3 darkMist = vec3(0.0020, 0.0042, 0.0105);
-  vec3 mistCol  = mix(calmMist, darkMist, atmMix);
+  // Specular mineral glint on steep moonlit rock cliffs
+  vec3 halfMoon = normalize(moonDir + viewDir);
+  float rockSpec = pow(clamp(dot(N, halfMoon), 0.0, 1.0), 22.0) * rockMask * selfShadow;
 
-  float baseMistFactor = 1.0 - smoothstep(0.0, 3.8 + vLayer * 1.9, vHeight);
-  float distHaze = mix(0.26, 0.76, vLayer * 0.5);
-  col = mix(col, mistCol, clamp(max(baseMistFactor * 0.94, distHaze * (1.0 - atmMix * 0.35)), 0.0, 0.96));
+  vec3 moonLitCliff = vec3(0.088, 0.148, 0.275) * moonRaking * (0.45 + 0.85 * rockMask * rockAlbedoTex)
+                    + vec3(0.075, 0.125, 0.235) * rockSpec;
+
+  // Razor crest rim-backlight along high jagged mountain spines against the night sky
+  float skyCrestRim = smoothstep(0.45, 0.98, vRidge)
+                    * smoothstep(3.0, 15.0, vHeight)
+                    * pow(1.0 - abs(dot(geomN, viewDir)), 1.8);
+  moonLitCliff += vec3(0.032, 0.064, 0.135) * skyCrestRim;
+
+  // Subtle sky-dome ambient fill ONLY on upward-facing ridges so shadowed ravines stay ink-dark!
+  moonLitCliff += vec3(0.005, 0.011, 0.025) * clamp(N.y, 0.0, 1.0) * fissureAO;
+
+  col += moonLitCliff * atmMix * (1.0 - vLayer * 0.18);
+
+  // Faint warm golden bounce on central near-shore cliffs from the Hokora & Lantern Sea
+  float shrineBounce = exp(-abs(vWorldPos.x) * 0.055) * (1.0 - step(0.5, vLayer));
+  col += vec3(0.028, 0.016, 0.006) * shrineBounce * (1.0 - smoothstep(0.0, 5.5, vHeight)) * atmMix;
+
+  // 5. Localized Drifting Shoreline & Ravine Mist (Keeps upper craggy peaks crisp & high-contrast!)
+  vec3 calmMist =
+      vec3(0.640, 0.590, 0.655) * uSeasonWeights.x
+    + vec3(0.540, 0.650, 0.715) * uSeasonWeights.y
+    + vec3(0.685, 0.545, 0.445) * uSeasonWeights.z
+    + vec3(0.585, 0.645, 0.705) * uSeasonWeights.w;
+
+  float driftFog = texture2D(uNoiseTex, vec2(vWorldPos.x * 0.011 + uTime * 0.0028, vLayer * 0.37 + vWorldPos.z * 0.006)).r;
+  // Subtle dark nocturnal mist nestled strictly along the water's edge and deep gorges
+  vec3 darkValleyMist = mix(vec3(0.006, 0.013, 0.028), vec3(0.014, 0.026, 0.054), vLayer * 0.45) * (0.70 + 0.55 * driftFog);
+  vec3 mistCol = mix(calmMist, darkValleyMist, atmMix);
+
+  float gullyMistBoost = (1.0 - vRidge) * 1.4;
+  float mistCeiling = mix(3.8 + vLayer * 2.2, 2.1 + vLayer * 1.3 + gullyMistBoost, atmMix);
+  float baseMistFactor = (1.0 - smoothstep(0.0, mistCeiling, vHeight)) * (0.78 + 0.22 * driftFog);
+  float distHaze = mix(0.18 + vLayer * 0.18, 0.04 + vLayer * 0.09, atmMix);
+  col = mix(col, mistCol, clamp(max(baseMistFactor * mix(0.88, 0.76, atmMix), distHaze), 0.0, 0.90));
 
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
@@ -365,53 +454,115 @@ void main() {
 // ============================================================================
 // GEOMETRY BUILDERS
 // ============================================================================
+// 2D Value Noise & Ridged Multifractal helper for sharp eroded alpine coastal spurs & gorges!
+function mtnHash2(ix: number, iy: number, seed: number): number {
+  const h = Math.sin(ix * 127.1 + iy * 311.7 + seed * 53.3) * 43758.5453123;
+  return h - Math.floor(h);
+}
+
+function mtnNoise2(x: number, y: number, seed: number): number {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const ux = fx * fx * (3.0 - 2.0 * fx);
+  const uy = fy * fy * (3.0 - 2.0 * fy);
+  const a = mtnHash2(ix, iy, seed);
+  const b = mtnHash2(ix + 1, iy, seed);
+  const c = mtnHash2(ix, iy + 1, seed);
+  const d = mtnHash2(ix + 1, iy + 1, seed);
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+}
+
+function evalRidgedMultifractal(x: number, y: number, seed: number): number {
+  let sum = 0.0;
+  let amp = 0.54;
+  let freq = 1.0;
+  let weight = 1.0;
+  for (let o = 0; o < 5; o++) {
+    const n = mtnNoise2(x * freq, y * freq, seed + o * 19);
+    // Sharp inverted crease -> squared ridge spine!
+    let signal = 1.0 - Math.abs(n * 2.0 - 1.0);
+    signal = signal * signal * weight;
+    weight = THREE.MathUtils.clamp(signal * 1.85, 0.15, 1.0);
+    sum += signal * amp;
+    freq *= 2.12;
+    amp *= 0.48;
+  }
+  return sum;
+}
+
 function buildMountainRangesGeometry(): THREE.BufferGeometry {
   const positions: number[] = [];
   const normals: number[] = [];
   const layers: number[] = [];
+  const ridges: number[] = [];
   const indices: number[] = [];
 
   const ringConfigs = [
-    { layer: 0, radius: 74, maxH: 10.5, arcStart: -Math.PI * 0.92, arcEnd: -Math.PI * 0.08, segs: 110, seed: 1.3 },
-    { layer: 1, radius: 104, maxH: 16.5, arcStart: -Math.PI * 1.08, arcEnd: Math.PI * 0.08, segs: 130, seed: 4.7 },
-    { layer: 2, radius: 138, maxH: 24.5, arcStart: -Math.PI * 1.18, arcEnd: Math.PI * 0.18, segs: 140, seed: 9.2 },
+    { layer: 0, radius: 72, maxH: 13.5, arcStart: -Math.PI * 0.94, arcEnd: -Math.PI * 0.06, segs: 210, seed: 1.7, thick: 28.0 },
+    { layer: 1, radius: 103, maxH: 20.5, arcStart: -Math.PI * 1.10, arcEnd: Math.PI * 0.10, segs: 230, seed: 5.3, thick: 34.0 },
+    { layer: 2, radius: 138, maxH: 29.0, arcStart: -Math.PI * 1.18, arcEnd: Math.PI * 0.18, segs: 220, seed: 9.8, thick: 40.0 },
   ];
 
   let vertOffset = 0;
   for (const cfg of ringConfigs) {
-    const radialRows = 6;
-    const ringThickness = 22.0;
+    const radialRows = 18;
+    const ringThickness = cfg.thick;
 
     for (let i = 0; i <= cfg.segs; i++) {
       const u = i / cfg.segs;
       const theta = cfg.arcStart + u * (cfg.arcEnd - cfg.arcStart);
-      const arcEnvelope = Math.sin(u * Math.PI);
+      const arcEnvelope = Math.pow(Math.sin(u * Math.PI), 0.58);
 
       let centerChannelMask = 1.0;
       if (cfg.layer === 0) {
+        // Frame the central Hokora & Torii vista with dramatic flanking island headlands!
         const distFromBackCenter = Math.abs(theta + Math.PI * 0.5);
-        centerChannelMask = THREE.MathUtils.smoothstep(distFromBackCenter, 0.10, 0.34);
+        centerChannelMask = THREE.MathUtils.smoothstep(distFromBackCenter, 0.11, 0.36);
       } else if (cfg.layer === 1) {
         const distFromBackCenter = Math.abs(theta + Math.PI * 0.5);
-        centerChannelMask = 0.42 + 0.58 * THREE.MathUtils.smoothstep(distFromBackCenter, 0.04, 0.28);
+        centerChannelMask = 0.34 + 0.66 * THREE.MathUtils.smoothstep(distFromBackCenter, 0.05, 0.28);
       }
 
-      const n1 = Math.abs(Math.sin(theta * 5.0 + cfg.seed));
-      const n2 = Math.abs(Math.cos(theta * 11.0 - cfg.seed * 1.7)) * 0.5;
-      const n3 = Math.abs(Math.sin(theta * 23.0 + cfg.seed * 2.3)) * 0.22;
-      const ridgeH =
-        cfg.maxH *
-        Math.pow(arcEnvelope, 0.65) *
-        centerChannelMask *
-        (0.32 + 0.68 * (1.0 - n1 * 0.55 + n2 * 0.45 + n3 * 0.3));
-
       for (let r = 0; r <= radialRows; r++) {
-        const rv = r / radialRows;
-        const crossProfile =
-          rv < 0.45 ? Math.pow(rv / 0.45, 1.35) : Math.pow(1.0 - (rv - 0.45) / 0.55, 1.2);
-        const rad = cfg.radius + (rv - 0.2) * ringThickness;
-        positions.push(Math.cos(theta) * rad, ridgeH * crossProfile - 0.35, Math.sin(theta) * rad);
+        const rv = r / radialRows; // 0 = inner shoreline, ~0.44 = main spine, 1 = back slope
+        const rad = cfg.radius + (rv - 0.22) * ringThickness;
+        const wx = Math.cos(theta) * rad;
+        const wz = Math.sin(theta) * rad;
+
+        // Sharp tent-like cross-ridge envelope (NOT rounded!)
+        const spinePos = 0.44 + (mtnNoise2(theta * 3.5, cfg.seed, 31) - 0.5) * 0.14;
+        const distSpine = Math.abs(rv - spinePos) / (rv < spinePos ? spinePos : 1.0 - spinePos);
+        const crossEnvelope = Math.pow(Math.max(0.0, 1.0 - distSpine), 1.28);
+
+        // 2D Ridged Multifractal + Radial Lateral Spurs carving V-shaped valleys down to the water!
+        const mainRidged = evalRidgedMultifractal(wx * 0.032, wz * 0.032, cfg.seed);
+        const spurWave = 1.0 - Math.abs(Math.sin(theta * 19.0 + rv * 2.4 + mtnNoise2(wx * 0.05, wz * 0.05, cfg.seed + 7) * 3.2));
+        const lateralSpurs = Math.pow(spurWave, 1.75);
+        const fineCrags = evalRidgedMultifractal(wx * 0.088, wz * 0.088, cfg.seed + 41) * 0.28;
+
+        const combinedRelief = THREE.MathUtils.clamp(
+          mainRidged * 0.62 + lateralSpurs * 0.38 + fineCrags,
+          0.0,
+          1.45
+        );
+
+        // Carve deep eroded river gorges while pushing ridge crests into sharp alpine peaks!
+        const sculptedFactor = Math.pow(combinedRelief, 1.35);
+        const y =
+          cfg.maxH * arcEnvelope * centerChannelMask * crossEnvelope * (0.18 + 0.95 * sculptedFactor) -
+          0.55;
+
+        const ridgeAttr = THREE.MathUtils.clamp(
+          (1.0 - distSpine * 0.65) * (0.45 * mainRidged + 0.55 * lateralSpurs),
+          0.0,
+          1.0
+        );
+
+        positions.push(wx, y, wz);
         layers.push(cfg.layer);
+        ridges.push(ridgeAttr);
         normals.push(0, 1, 0);
       }
     }
@@ -433,6 +584,7 @@ function buildMountainRangesGeometry(): THREE.BufferGeometry {
   geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geom.setAttribute('aLayer', new THREE.Float32BufferAttribute(layers, 1));
+  geom.setAttribute('aRidge', new THREE.Float32BufferAttribute(ridges, 1));
   geom.setIndex(indices);
   geom.computeVertexNormals();
   return geom;
@@ -587,6 +739,16 @@ function buildSpiritMotesGeometry(): THREE.BufferGeometry {
 
 export function AtmosphericScenery() {
   const mountainMeshRef = useRef<THREE.Mesh>(null);
+  const carpetMeshRef = useRef<THREE.Mesh>(null);
+  const shaftMeshRef = useRef<THREE.Mesh>(null);
+  const windMeshRef = useRef<THREE.Mesh>(null);
+
+  const mountainMatRef = useRef<THREE.ShaderMaterial>(null);
+  const carpetMatRef = useRef<THREE.ShaderMaterial>(null);
+  const shaftMatRef = useRef<THREE.ShaderMaterial>(null);
+  const windMatRef = useRef<THREE.ShaderMaterial>(null);
+  const moteMatRef = useRef<THREE.ShaderMaterial>(null);
+
   const noiseTex = useMemo(() => getSharedNoiseTexture(), []);
 
   const mountainGeom = useMemo(() => buildMountainRangesGeometry(), []);
@@ -594,50 +756,40 @@ export function AtmosphericScenery() {
   const shaftGeom = useMemo(() => buildLightShaftsGeometry(), []);
   const moteGeom = useMemo(() => buildSpiritMotesGeometry(), []);
 
-  const mountainUniforms = useMemo(
-    () => ({
-      uTime: { value: 0 },
-      uPortalProgress: { value: 0 },
-    }),
-    []
-  );
+  const mountainUniformsRef = useRef({
+    uNoiseTex: { value: noiseTex },
+    uTime: { value: 0 },
+    uPortalProgress: { value: 0 },
+    uSeasonWeights: { value: new THREE.Vector4(1, 0, 0, 0) },
+  });
+  mountainUniformsRef.current.uNoiseTex.value = noiseTex;
 
-  const windUniforms = useMemo(
-    () => ({
-      uTime: { value: 0 },
-      uPortalProgress: { value: 0 },
-      uCameraPos: { value: new THREE.Vector3() },
-    }),
-    []
-  );
+  const windUniformsRef = useRef({
+    uTime: { value: 0 },
+    uPortalProgress: { value: 0 },
+    uCameraPos: { value: new THREE.Vector3() },
+  });
 
-  const shaftUniforms = useMemo(
-    () => ({
-      uNoiseTex: { value: noiseTex },
-      uTime: { value: 0 },
-      uPortalProgress: { value: 0 },
-      uShockwave: { value: 0 },
-    }),
-    [noiseTex]
-  );
+  const shaftUniformsRef = useRef({
+    uNoiseTex: { value: noiseTex },
+    uTime: { value: 0 },
+    uPortalProgress: { value: 0 },
+    uShockwave: { value: 0 },
+  });
+  shaftUniformsRef.current.uNoiseTex.value = noiseTex;
 
-  const carpetUniforms = useMemo(
-    () => ({
-      uNoiseTex: { value: noiseTex },
-      uTime: { value: 0 },
-      uPortalProgress: { value: 0 },
-    }),
-    [noiseTex]
-  );
+  const carpetUniformsRef = useRef({
+    uNoiseTex: { value: noiseTex },
+    uTime: { value: 0 },
+    uPortalProgress: { value: 0 },
+  });
+  carpetUniformsRef.current.uNoiseTex.value = noiseTex;
 
-  const moteUniforms = useMemo(
-    () => ({
-      uTime: { value: 0 },
-      uPortalProgress: { value: 0 },
-      uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 1.5) },
-    }),
-    []
-  );
+  const moteUniformsRef = useRef({
+    uTime: { value: 0 },
+    uPortalProgress: { value: 0 },
+    uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 1.5) },
+  });
 
   useEffect(() => {
     if (mountainMeshRef.current) {
@@ -648,23 +800,36 @@ export function AtmosphericScenery() {
   useFrame(({ clock, camera }) => {
     const t = clock.getElapsedTime();
     const p = experienceState.portalProgress;
+    const nearGateZone = experienceState.travelProgress < 0.78;
 
-    mountainUniforms.uTime.value = t;
-    mountainUniforms.uPortalProgress.value = p;
+    const mu = mountainMatRef.current ? mountainMatRef.current.uniforms : mountainUniformsRef.current;
+    mu.uTime.value = t;
+    mu.uPortalProgress.value = p;
+    mu.uSeasonWeights.value.copy(experienceState.seasonWeights);
 
-    windUniforms.uTime.value = t;
-    windUniforms.uPortalProgress.value = p;
-    windUniforms.uCameraPos.value.copy(camera.position);
+    if (carpetMeshRef.current) carpetMeshRef.current.visible = nearGateZone;
+    if (shaftMeshRef.current) shaftMeshRef.current.visible = nearGateZone;
+    if (windMeshRef.current) windMeshRef.current.visible = nearGateZone;
 
-    shaftUniforms.uTime.value = t;
-    shaftUniforms.uPortalProgress.value = p;
-    shaftUniforms.uShockwave.value = experienceState.clickShockwave;
+    if (nearGateZone) {
+      const wu = windMatRef.current ? windMatRef.current.uniforms : windUniformsRef.current;
+      wu.uTime.value = t;
+      wu.uPortalProgress.value = p;
+      wu.uCameraPos.value.copy(camera.position);
 
-    carpetUniforms.uTime.value = t;
-    carpetUniforms.uPortalProgress.value = p;
+      const su = shaftMatRef.current ? shaftMatRef.current.uniforms : shaftUniformsRef.current;
+      su.uTime.value = t;
+      su.uPortalProgress.value = p;
+      su.uShockwave.value = experienceState.clickShockwave;
 
-    moteUniforms.uTime.value = t;
-    moteUniforms.uPortalProgress.value = p;
+      const cu = carpetMatRef.current ? carpetMatRef.current.uniforms : carpetUniformsRef.current;
+      cu.uTime.value = t;
+      cu.uPortalProgress.value = p;
+    }
+
+    const mtu = moteMatRef.current ? moteMatRef.current.uniforms : moteUniformsRef.current;
+    mtu.uTime.value = t;
+    mtu.uPortalProgress.value = p;
   });
 
   return (
@@ -678,15 +843,17 @@ export function AtmosphericScenery() {
         name="MistyMountainIslands"
       >
         <shaderMaterial
+          ref={mountainMatRef}
           vertexShader={mountainVertexShader}
           fragmentShader={mountainFragmentShader}
-          uniforms={mountainUniforms}
+          uniforms={mountainUniformsRef.current}
           side={THREE.DoubleSide}
         />
       </mesh>
 
       {/* 2. Low Rolling Sea-Surface Fog Carpet around Submerged Torii Pillars */}
       <mesh
+        ref={carpetMeshRef}
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.07, 0]}
         renderOrder={1}
@@ -695,9 +862,10 @@ export function AtmosphericScenery() {
       >
         <planeGeometry args={[52, 52, 1, 1]} />
         <shaderMaterial
+          ref={carpetMatRef}
           vertexShader={carpetVertexShader}
           fragmentShader={carpetFragmentShader}
-          uniforms={carpetUniforms}
+          uniforms={carpetUniformsRef.current}
           transparent
           depthWrite={false}
         />
@@ -705,6 +873,7 @@ export function AtmosphericScenery() {
 
       {/* 3. Volumetric Mystical God-Rays (Komorebi) & Portal Light Shafts */}
       <mesh
+        ref={shaftMeshRef}
         geometry={shaftGeom}
         frustumCulled={false}
         raycast={() => null}
@@ -712,9 +881,10 @@ export function AtmosphericScenery() {
         name="MysticLightShafts"
       >
         <shaderMaterial
+          ref={shaftMatRef}
           vertexShader={rayVertexShader}
           fragmentShader={rayFragmentShader}
-          uniforms={shaftUniforms}
+          uniforms={shaftUniformsRef.current}
           transparent
           depthWrite={false}
           side={THREE.DoubleSide}
@@ -724,6 +894,7 @@ export function AtmosphericScenery() {
 
       {/* 4. Ghost-of-Tsushima Camera-Aligned Gossamer Wind Filaments */}
       <mesh
+        ref={windMeshRef}
         geometry={windGeom}
         frustumCulled={false}
         raycast={() => null}
@@ -731,9 +902,10 @@ export function AtmosphericScenery() {
         name="GossamerWindFilaments"
       >
         <shaderMaterial
+          ref={windMatRef}
           vertexShader={windVertexShader}
           fragmentShader={windFragmentShader}
-          uniforms={windUniforms}
+          uniforms={windUniformsRef.current}
           transparent
           depthWrite={false}
           side={THREE.DoubleSide}
@@ -749,9 +921,10 @@ export function AtmosphericScenery() {
         name="SpiritMotes"
       >
         <shaderMaterial
+          ref={moteMatRef}
           vertexShader={moteVertexShader}
           fragmentShader={moteFragmentShader}
-          uniforms={moteUniforms}
+          uniforms={moteUniformsRef.current}
           transparent
           depthWrite={false}
           blending={THREE.AdditiveBlending}

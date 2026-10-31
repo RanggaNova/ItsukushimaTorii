@@ -247,11 +247,12 @@ void main() {
 export function InteractiveOcean() {
   const { gl, scene, camera } = useThree();
   const oceanMeshRef = useRef<THREE.Mesh>(null);
+  const oceanMatRef = useRef<THREE.ShaderMaterial>(null);
   const noiseTex = useMemo(() => getSharedNoiseTexture(), []);
 
-  // 512x512 Planar Reflection FBO = 4x faster GPU fill rate while naturally rippled by water waves!
+  // 384x384 Planar Reflection FBO = super-fast GPU fill rate while naturally rippled by water waves!
   const reflectionTarget = useMemo(() => {
-    return new THREE.WebGLRenderTarget(512, 512, {
+    return new THREE.WebGLRenderTarget(384, 384, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       format: THREE.RGBAFormat,
@@ -292,49 +293,50 @@ export function InteractiveOcean() {
     []
   );
 
-  const uniforms = useMemo(
-    () => ({
-      uReflectionMap: { value: reflectionTarget.texture },
-      uNoiseTex: { value: noiseTex },
-      uTextureMatrix: { value: textureMatrix },
-      uTime: { value: 0 },
-      uPortalProgress: { value: 0 },
-      uShockwave: { value: 0 },
-      uCameraPos: { value: new THREE.Vector3() },
-      uCursorWorld: { value: new THREE.Vector3(0, 0, 1000) },
-      uCursorActive: { value: 0 },
-      uRipples: { value: rippleUniformArray },
-      uFogColor: { value: new THREE.Color('#c8d3dd') },
-      uFogDensity: { value: 0.0082 },
-    }),
-    [reflectionTarget.texture, noiseTex, textureMatrix, rippleUniformArray]
-  );
+  const uniformsRef = useRef({
+    uReflectionMap: { value: reflectionTarget.texture },
+    uNoiseTex: { value: noiseTex },
+    uTextureMatrix: { value: textureMatrix },
+    uTime: { value: 0 },
+    uPortalProgress: { value: 0 },
+    uShockwave: { value: 0 },
+    uCameraPos: { value: new THREE.Vector3() },
+    uCursorWorld: { value: new THREE.Vector3(0, 0, 1000) },
+    uCursorActive: { value: 0 },
+    uRipples: { value: rippleUniformArray },
+    uFogColor: { value: new THREE.Color('#c8d3dd') },
+    uFogDensity: { value: 0.0082 },
+  });
+  uniformsRef.current.uReflectionMap.value = reflectionTarget.texture;
+  uniformsRef.current.uNoiseTex.value = noiseTex;
 
   useFrame(({ clock }, delta) => {
     const t = clock.getElapsedTime();
     const dt = Math.min(delta, 0.05);
+    const u = oceanMatRef.current ? oceanMatRef.current.uniforms : uniformsRef.current;
 
-    uniforms.uTime.value = t;
-    uniforms.uPortalProgress.value = experienceState.portalProgress;
-    uniforms.uShockwave.value = experienceState.clickShockwave;
-    uniforms.uCameraPos.value.copy(camera.position);
-    uniforms.uCursorWorld.value.copy(experienceState.waterHitPoint);
+    u.uTime.value = t;
+    u.uPortalProgress.value = experienceState.portalProgress;
+    u.uShockwave.value = experienceState.clickShockwave;
+    u.uCameraPos.value.copy(camera.position);
+    u.uCursorWorld.value.copy(experienceState.waterHitPoint);
 
     const targetCursorActive = experienceState.hasWaterHit ? 1.0 : 0.0;
-    uniforms.uCursorActive.value = THREE.MathUtils.lerp(
-      uniforms.uCursorActive.value,
+    u.uCursorActive.value = THREE.MathUtils.lerp(
+      u.uCursorActive.value,
       targetCursorActive,
       1.0 - Math.exp(-6.0 * dt)
     );
 
+    const liveRipples = u.uRipples.value as THREE.Vector4[];
     for (let i = 0; i < MAX_RIPPLES; i++) {
       const r = experienceState.ripples[i];
-      rippleUniformArray[i].set(r.x, r.z, r.birthTime, r.strength);
+      liveRipples[i].set(r.x, r.z, r.birthTime, r.strength);
     }
 
     if (scene.fog && scene.fog instanceof THREE.FogExp2) {
-      uniforms.uFogColor.value.copy(scene.fog.color);
-      uniforms.uFogDensity.value = scene.fog.density;
+      u.uFogColor.value.copy(scene.fog.color);
+      u.uFogDensity.value = scene.fog.density;
     }
 
     // Mirror camera position & live view direction across y = 0 (works at ANY 360° Orbit & Zoom!)
@@ -382,12 +384,13 @@ export function InteractiveOcean() {
       raycast={() => null}
       name="InteractiveOceanMesh"
     >
-      {/* 128x128 grid + raycast disabled = zero CPU raycast cost & silky GPU vertex throughput! */}
-      <planeGeometry args={[280, 280, 128, 128]} />
+      {/* 96x96 grid + raycast disabled = zero CPU raycast cost & silky GPU vertex throughput! */}
+      <planeGeometry args={[280, 280, 96, 96]} />
       <shaderMaterial
+        ref={oceanMatRef}
         vertexShader={oceanVertexShader}
         fragmentShader={oceanFragmentShader}
-        uniforms={uniforms}
+        uniforms={uniformsRef.current}
       />
     </mesh>
   );

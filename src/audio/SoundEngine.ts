@@ -198,6 +198,64 @@ class SoundEngine {
     osc.start(now);
     osc.stop(now + 1.85);
   }
+
+  public triggerSeasonChime(season: 'haru' | 'natsu' | 'aki' | 'fuyu') {
+    if (!this.initialized || !this.enabled || !this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    // Japanese Hirajōshi pentatonic koto/bell intervals per season
+    const notesBySeason: Record<string, [number, number]> = {
+      haru: [587.33, 880.0],  // D5 -> A5 (bright spring sakura)
+      natsu: [523.25, 783.99], // C5 -> G5 (clear summer sea)
+      aki: [440.0, 622.25],    // A4 -> Eb5 (wistful autumn dusk)
+      fuyu: [392.0, 587.33],   // G4 -> D5 (crystalline winter)
+    };
+    const pair = notesBySeason[season] || [587.33, 880.0];
+
+    pair.forEach((freq, idx) => {
+      if (!this.ctx || !this.masterGain) return;
+      const t0 = now + idx * 0.14;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t0);
+
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(0.11, t0 + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0005, t0 + 2.1);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(t0);
+      osc.stop(t0 + 2.2);
+    });
+  }
+
+  public triggerLanternBell(isWish = false) {
+    if (!this.initialized || !this.enabled || !this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    // Warm Shinto Rin singing-bowl / Suzu chime
+    const partials = isWish ? [587.33, 880.0, 1174.66] : [523.25, 1046.5];
+    partials.forEach((freq, idx) => {
+      if (!this.ctx || !this.masterGain) return;
+      const t0 = now + idx * (isWish ? 0.11 : 0.04);
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t0);
+
+      const peak = (isWish ? 0.14 : 0.09) / (idx + 1);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(peak, t0 + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0004, t0 + (isWish ? 3.2 : 2.2));
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(t0);
+      osc.stop(t0 + 3.3);
+    });
+  }
 }
 
 export const soundEngine = new SoundEngine();

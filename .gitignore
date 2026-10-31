@@ -27,3 +27,7 @@ Thumbs.db
 
 # TypeScript cache
 tsconfig.tsbuildinfo
+
+# Local SQLite database runtime files
+data/*.sqlite*
+data/*.db*
