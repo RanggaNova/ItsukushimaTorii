@@ -1,13 +1,16 @@
-# Itsukushima Torii - Riwayat Percakapan Pasangan Pemrograman (Antigravity & User)
+# Itsukushima Torii - Riwayat Percakapan Interaktif (Antigravity & User)
 
 > **Proyek**: Itsukushima Torii 3D Experience (Three.js / React Three Fiber / Vite / Vercel)
 > **Repository**: https://github.com/RanggaNova/ItsukushimaTorii
 > **Live URL**: https://itsukushima-torii.vercel.app
-> **Total Pesan**: 85 Entri
 
 ---
 
 ### 👤 User (30/10/2026, 23.06.15)
+
+**Lampiran Gambar dari User:**
+
+![media_1793375707744_4db3b7fc.png](./chat_media/media_1793375707744_4db3b7fc.png)
 
 Buat sebuah website immersive 3D dengan konsep gerbang Torii Jepang yang berdiri kokoh di tengah lautan luas.
 
@@ -290,6 +293,10 @@ Sekarang saya bisa langsung mulai membuat dan mengeksekusi model 3D Gerbang Tori
 
 ### 👤 User (30/10/2026, 23.10.11)
 
+**Lampiran Gambar dari User:**
+
+![media_1793376599649_635a6d10.jpg](./chat_media/media_1793376599649_635a6d10.jpg)
+
 ini untuk blue print gate jepang nya (entah namanya apa)
 
 <ADDITIONAL_METADATA>
@@ -323,6 +330,10 @@ Bagaimana menurut Anda, apakah bentuk dan proporsinya sudah pas untuk kita ekspo
 ---
 
 ### 👤 User (30/10/2026, 23.19.55)
+
+**Lampiran Gambar dari User:**
+
+![media_1793377103447_81ba9a5c.jpg](./chat_media/media_1793377103447_81ba9a5c.jpg)
 
 coba bikin ulang dengan blue print dan prompt ini
 
@@ -424,6 +435,10 @@ Silakan buka http://localhost:5173/ dan coba arahkan kursor ke permukaan air mau
 ---
 
 ### 👤 User (31/10/2026, 00.28.59)
+
+**Lampiran Gambar dari User:**
+
+![media_1793381090242_0fd84787.png](./chat_media/media_1793381090242_0fd84787.png)
 
 kok ngelag ya?
 
@@ -950,6 +965,12 @@ Seluruh konsep terpadu beserta perbaikan keterbacaan teks mode terang sudah sele
 
 ### 👤 User (31/10/2026, 16.02.38)
 
+**Lampiran Gambar dari User:**
+
+![media_1793436931315_613ee861.png](./chat_media/media_1793436931315_613ee861.png)
+
+![media_1793437243531_788a1205.png](./chat_media/media_1793437243531_788a1205.png)
+
 untuk teksnya jangan di kasih placeholder putih gini 
 
 ubah teksnya jadi emas saja di kondisi awal
@@ -1011,6 +1032,12 @@ Semua perbaikan visual, animasi, dan optimasi anti-lag sudah selesai diterapkan 
 
 ### 👤 User (31/10/2026, 16.30.00)
 
+**Lampiran Gambar dari User:**
+
+![media_1793438542127_4ff931ee.png](./chat_media/media_1793438542127_4ff931ee.png)
+
+![media_1793438894880_d3052350.jpg](./chat_media/media_1793438894880_d3052350.jpg)
+
 okeh sudah sangat lancar 
 
 cuman teks shadownya masih terlalu tebal, bikin tipis saja 
@@ -1067,6 +1094,10 @@ mbah beban lampu dinamis (*tetap mulus 60–120 FPS*).
 ---
 
 ### 👤 User (31/10/2026, 17.00.41)
+
+**Lampiran Gambar dari User:**
+
+![media_1793440536842_fe13823a.png](./chat_media/media_1793440536842_fe13823a.png)
 
 kok mode gelap saat masuk portal kok menghilang dan 4 musimnya juga tidak berfungsi, ini penting coba kembalikan
 
@@ -1241,6 +1272,10 @@ Lampu Hokora sekarang selalu terdaftar dan hanya intensitasnya yang diubah. Deng
 ---
 
 ### 👤 User (31/10/2026, 19.14.12)
+
+**Lampiran Gambar dari User:**
+
+![media_1793448823514_2d000298.png](./chat_media/media_1793448823514_2d000298.png)
 
 tolong ganti teks bahasa indo ini jadi inggris 
 
@@ -1588,6 +1623,10 @@ Website Anda sudah bisa dibuka publik dan dinikmati. Agar lentera permohonan yan
 
 ### 👤 User (31/10/2026, 21.11.27)
 
+**Lampiran Gambar dari User:**
+
+![media_1793455876418_89f312ee.png](./chat_media/media_1793455876418_89f312ee.png)
+
 gini aja settingannya?
 
 <ADDITIONAL_METADATA>
@@ -1616,6 +1655,10 @@ Tunggu sekitar 1 menit hingga proses build selesai, dan website Anda akan langsu
 ---
 
 ### 👤 User (31/10/2026, 21.20.01)
+
+**Lampiran Gambar dari User:**
+
+![media_1793456395739_b78be1b1.png](./chat_media/media_1793456395739_b78be1b1.png)
 
 ini read region apa 
 
@@ -1649,6 +1692,10 @@ Setelah database selesai dibuat, Vercel akan otomatis menyambungkan database ini
 ---
 
 ### 👤 User (31/10/2026, 21.22.39)
+
+**Lampiran Gambar dari User:**
+
+![media_1793456553414_0d73383d.png](./chat_media/media_1793456553414_0d73383d.png)
 
 oke saya sudah sambungkan lalu apa 
 
@@ -1695,6 +1742,10 @@ Selamat, website interaktif 3D Itsukushima Torii Anda sekarang sudah **resmi onl
 ---
 
 ### 👤 User (31/10/2026, 22.00.53)
+
+**Lampiran Gambar dari User:**
+
+![media_1793458758575_745b49a3.png](./chat_media/media_1793458758575_745b49a3.png)
 
 di hp tidak bisa lihat lenteranya karena diluar dari framenya (lihat gambarnya), apakah kamu bisa sesuaikan 
 
@@ -1804,6 +1855,37 @@ mana gaada tombol share
 
 <ADDITIONAL_METADATA>
 The current local time is: 2026-10-31T22:58:25+07:00.
+</ADDITIONAL_METADATA>
+
+---
+
+### 🤖 Antigravity (31/10/2026, 22.59.34)
+
+Mohon maaf atas kebingungannya! Di Antigravity (karena ini adalah aplikasi desktop / IDE yang berjalan secara lokal di komputer Anda, bukan website cloud seperti ChatGPT publik), **memang tidak ada tombol "Share Link" bawaan di antarmukanya.**
+
+Agar Anda tetap bisa membagikan seluruh isi percakapan ini ke orang lain, **saya sudah otomatis mengekstrak seluruh rekaman percakapan kita dari awal hingga saat ini (85 entri percakapan lengkap)** ke dalam file dokumentasi Markdown dan sudah saya push ke GitHub!
+
+---
+
+### Cara Membagikannya:
+
+1. **Bagikan Lewat Link Online GitHub (Paling Mudah)**:
+   Kirimkan tautan ini ke teman/rekan Anda, mereka bisa langsung membaca seluruh alur percakapan dan coding kita di browser:
+   👉 **[https://github.com/RanggaNova/ItsukushimaTorii/blob/main/CONVERSATION_HISTORY.md](https://github.com/RanggaNova/ItsukushimaTorii/blob/main/CONVERSATION_HISTORY.md)**
+
+2. **File Lokal di Laptop/PC Anda**:
+   File-nya tersimpan di dalam folder proyek Anda:
+   📁 **`C:\ANTIGRAVITY\torii-portal\CONVERSATION_HISTORY.md`**
+   *(Bisa Anda buka langsung di text editor, copy teksnya, atau kirim filenya via WhatsApp/Email).*
+
+---
+
+### 👤 User (31/10/2026, 23.01.17)
+
+gambarnya mana yang saya inputkan kok gaada
+
+<ADDITIONAL_METADATA>
+The current local time is: 2026-10-31T23:01:17+07:00.
 </ADDITIONAL_METADATA>
 
 ---
