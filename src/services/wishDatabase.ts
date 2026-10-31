@@ -2,6 +2,12 @@ import type { SeasonId } from '../state/experienceState';
 
 export interface WishLanternSlot {
   id: number;
+  author_name?: string;
+  wish_text: string;
+  season?: SeasonId;
+  omikuji_rank?: string;
+  omikuji_label?: string;
+  omikuji_verse?: string;
   pos_x: number;
   pos_z: number;
   created_at: string;
@@ -23,9 +29,9 @@ export interface WishListResponse {
   source: 'sqlite' | 'local-fallback';
 }
 
-const FALLBACK_STORAGE_KEY = 'hokora_wishes_coords_v1';
+const FALLBACK_STORAGE_KEY = 'hokora_wishes_records_v2';
 
-function readFallbackCoords(): WishLanternSlot[] {
+function readFallbackRecords(): WishLanternSlot[] {
   try {
     const raw = window.localStorage.getItem(FALLBACK_STORAGE_KEY);
     if (!raw) return [];
@@ -36,9 +42,9 @@ function readFallbackCoords(): WishLanternSlot[] {
   }
 }
 
-function writeFallbackCoords(rows: WishLanternSlot[]) {
+function writeFallbackRecords(rows: WishLanternSlot[]) {
   try {
-    window.localStorage.setItem(FALLBACK_STORAGE_KEY, JSON.stringify(rows.slice(0, 100)));
+    window.localStorage.setItem(FALLBACK_STORAGE_KEY, JSON.stringify(rows.slice(0, 25)));
   } catch {
     // Ignore storage quota errors
   }
@@ -63,7 +69,7 @@ export async function fetchSavedWishes(): Promise<WishListResponse> {
       source: 'sqlite',
     };
   } catch {
-    const fallback = readFallbackCoords();
+    const fallback = readFallbackRecords();
     return {
       wishes: fallback,
       totalCount: fallback.length,
@@ -74,7 +80,7 @@ export async function fetchSavedWishes(): Promise<WishListResponse> {
 
 export async function saveWishToDatabase(
   payload: CreateWishPayload
-): Promise<{ totalCount: number; source: 'sqlite' | 'local-fallback' }> {
+): Promise<{ totalCount: number; source: 'sqlite' | 'local-fallback'; wish: WishLanternSlot }> {
   try {
     const res = await fetch('/api/wishes', {
       method: 'POST',
@@ -88,24 +94,45 @@ export async function saveWishToDatabase(
     const data = (await res.json()) as {
       ok?: boolean;
       totalCount?: number;
+      wish?: WishLanternSlot;
     };
-    return {
-      totalCount: typeof data.totalCount === 'number' ? data.totalCount : 1,
-      source: 'sqlite',
-    };
-  } catch {
-    const existing = readFallbackCoords();
-    const fallbackSlot: WishLanternSlot = {
+    const savedWish: WishLanternSlot = data.wish ?? {
       id: Date.now(),
+      author_name: 'Anonymous',
+      wish_text: payload.wish_text,
+      season: payload.season,
+      omikuji_rank: payload.omikuji_rank,
+      omikuji_label: payload.omikuji_label,
+      omikuji_verse: payload.omikuji_verse,
       pos_x: payload.pos_x,
       pos_z: payload.pos_z,
       created_at: new Date().toISOString(),
     };
-    const next = [fallbackSlot, ...existing];
-    writeFallbackCoords(next);
+    return {
+      totalCount: typeof data.totalCount === 'number' ? data.totalCount : 1,
+      source: 'sqlite',
+      wish: savedWish,
+    };
+  } catch {
+    const existing = readFallbackRecords();
+    const fallbackSlot: WishLanternSlot = {
+      id: Date.now(),
+      author_name: 'Anonymous',
+      wish_text: payload.wish_text,
+      season: payload.season,
+      omikuji_rank: payload.omikuji_rank,
+      omikuji_label: payload.omikuji_label,
+      omikuji_verse: payload.omikuji_verse,
+      pos_x: payload.pos_x,
+      pos_z: payload.pos_z,
+      created_at: new Date().toISOString(),
+    };
+    const next = [fallbackSlot, ...existing].slice(0, 25);
+    writeFallbackRecords(next);
     return {
       totalCount: next.length,
       source: 'local-fallback',
+      wish: fallbackSlot,
     };
   }
 }

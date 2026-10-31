@@ -12,7 +12,15 @@ export function CameraRig() {
   const waterIntersectPt = useMemo(() => new THREE.Vector3(), []);
   const dynamicTarget = useMemo(() => new THREE.Vector3(0, 2.55, 0), []);
 
-  // O(1) Zero-Lag Mathematical Water Plane Raycasting for interactive cursor waves & lantern placement
+  useEffect(() => {
+    experienceState.cameraRef = camera;
+    return () => {
+      experienceState.cameraRef = null;
+      document.body.style.cursor = 'default';
+    };
+  }, [camera]);
+
+  // O(1) Zero-Lag Mathematical Water Plane Raycasting for interactive cursor waves & lantern inspection
   useEffect(() => {
     const onPointerMove = (e: PointerEvent) => {
       const nx = (e.clientX / window.innerWidth) * 2 - 1;
@@ -44,10 +52,32 @@ export function CameraRig() {
       } else {
         experienceState.hasWaterHit = false;
       }
+
+      // Check hover over floating lanterns in Kakuriyo to provide intuitive pointer cursor
+      if (experienceState.travelProgress > 0.78 && experienceState.isPortalOpenTarget) {
+        const hovered = experienceState.findLanternAtScreen(
+          e.clientX,
+          e.clientY,
+          window.innerWidth,
+          window.innerHeight
+        );
+        if (hovered) {
+          document.body.style.cursor = 'pointer';
+          experienceState.setHoveredLantern(hovered.id);
+        } else {
+          document.body.style.cursor = 'default';
+          experienceState.setHoveredLantern(null);
+        }
+      } else {
+        document.body.style.cursor = 'default';
+        experienceState.setHoveredLantern(null);
+      }
     };
 
     const onPointerLeave = () => {
       experienceState.hasWaterHit = false;
+      document.body.style.cursor = 'default';
+      experienceState.setHoveredLantern(null);
     };
 
     window.addEventListener('pointermove', onPointerMove, { passive: true });
@@ -55,6 +85,7 @@ export function CameraRig() {
     return () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerleave', onPointerLeave);
+      document.body.style.cursor = 'default';
     };
   }, [camera, mathRaycaster, waterIntersectPt]);
 

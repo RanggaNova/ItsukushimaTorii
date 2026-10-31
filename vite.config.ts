@@ -95,17 +95,21 @@ function createWishDatabasePlugin(): Plugin {
       const database = getDb();
 
       if (req.method === 'GET') {
-        // Public frontend only receives lantern coordinates & count;
-        // full wish_text stays strictly private inside data/wishes.sqlite for developer inspection!
         const listStmt = database.prepare(`
           SELECT
             id,
+            author_name,
+            wish_text,
+            season,
+            omikuji_rank,
+            omikuji_label,
+            omikuji_verse,
             pos_x,
             pos_z,
             created_at
           FROM wishes
           ORDER BY id DESC
-          LIMIT 100
+          LIMIT 25
         `);
         const countStmt = database.prepare('SELECT COUNT(*) AS total FROM wishes');
         const wishes = listStmt.all();

@@ -78,15 +78,28 @@ export default function App() {
       experienceState.enterKakuriyo();
       soundEngine.triggerDimensionalPulse();
     } else if (experienceState.travelProgress > 0.78) {
-      // Inside Kakuriyo: clicking on the sea releases a glowing Tōrō water lantern!
-      const lx = experienceState.hasWaterHit
-        ? experienceState.waterHitPoint.x
-        : ((e.clientX / Math.max(1, window.innerWidth)) * 2 - 1) * 9.5;
-      const lz = experienceState.hasWaterHit
-        ? experienceState.waterHitPoint.z
-        : -20.0;
-      experienceState.spawnUserLantern(lx, lz, false);
-      soundEngine.triggerLanternBell(false);
+      // Inside Kakuriyo: clicking a floating lantern reveals the sacred prayer/wish carried within it!
+      const hitLantern = experienceState.findLanternAtScreen(
+        e.clientX,
+        e.clientY,
+        window.innerWidth,
+        window.innerHeight
+      );
+
+      if (hitLantern) {
+        experienceState.selectLantern(hitLantern);
+        soundEngine.triggerLanternBell(true);
+      } else {
+        // Water clicks only create serene ripples — lanterns are ONLY released via Make a Wish!
+        if (experienceState.hasWaterHit) {
+          experienceState.spawnRipple(
+            experienceState.waterHitPoint.x,
+            experienceState.waterHitPoint.z,
+            experienceState.elapsedTime,
+            0.55
+          );
+        }
+      }
     }
   };
 

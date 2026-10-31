@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { WishLanternSlot } from '../services/wishDatabase';
 
 export type SeasonId = 'haru' | 'natsu' | 'aki' | 'fuyu';
 
@@ -10,6 +11,7 @@ export interface RippleImpulse {
 }
 
 export interface LanternInstance {
+  id: number;
   active: boolean;
   x: number;
   z: number;
@@ -20,12 +22,60 @@ export interface LanternInstance {
   staggerOrder: number; // 0..1 order for rising from / sinking into water
   isUserSpawned: boolean;
   isGoldenWish: boolean;
+  wishText: string;
+  authorName?: string;
+  season?: SeasonId;
+  omikujiRank?: string;
+  omikujiLabel?: string;
+  omikujiVerse?: string;
+  createdAt?: string;
 }
 
 export const MAX_RIPPLES = 10;
-export const MAX_LANTERNS = 40;
-export const AMBIENT_LANTERN_COUNT = 20;
+export const MAX_LANTERNS = 25;
 export const HOKORA_SANCTUARY_Z = -20.2;
+
+export function evalOceanWaveHeight(x: number, z: number, t: number): number {
+  let h = 0.0;
+  h += Math.sin(z * 0.65 + x * 0.12 + t * 1.05) * 0.040;
+  h += Math.sin(z * 1.35 - x * 0.32 + t * 1.45) * 0.018;
+  h += Math.cos(x * 0.85 + z * 0.45 - t * 0.90) * 0.015;
+  const distFade = Math.exp(-Math.hypot(x, z) * 0.018);
+  return h * distFade;
+}
+
+export const INITIAL_PILGRIM_PRAYERS: {
+  text: string;
+  rank: string;
+  label: string;
+  season: SeasonId;
+}[] = [
+  { text: 'May the gentle tide carry peace to all weary spirits.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'haru' },
+  { text: 'Wishing for the courage to walk forward along this uncharted path.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'haru' },
+  { text: 'For the health, long life, and laughter of my elders.', rank: '中 吉', label: 'CHŪKICHI · SERENE FORTUNE', season: 'aki' },
+  { text: 'May warmth and quiet understanding heal the silence between us.', rank: '末 吉', label: 'SUEKICHI · DAWNING GRACE', season: 'fuyu' },
+  { text: 'A silent prayer for clarity when the world ahead feels veiled in fog.', rank: '玄 吉', label: 'GENKICHI · MYSTIC HARMONY', season: 'natsu' },
+  { text: 'May peace settle upon our village and across every distant shore.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'haru' },
+  { text: 'Wishing for gentle patience until the winter frost melts into spring.', rank: '末 吉', label: 'SUEKICHI · DAWNING GRACE', season: 'fuyu' },
+  { text: 'Gratitude for the unexpected kindness received from strangers.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'aki' },
+  { text: 'May my children grow with compassionate hearts and steady wings.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'haru' },
+  { text: 'Wishing to see an old friend once more beneath the summer moon.', rank: '中 吉', label: 'CHŪKICHI · SERENE FORTUNE', season: 'natsu' },
+  { text: 'For safe passage across the stormy seas and a peaceful homecoming.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'aki' },
+  { text: 'A prayer for recovery, rest, and renewal of strength.', rank: '中 吉', label: 'CHŪKICHI · SERENE FORTUNE', season: 'haru' },
+  { text: 'May honesty and quiet devotion guide every work of my hands.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'natsu' },
+  { text: 'Wishing for the wisdom to let go of grief and welcome new light.', rank: '玄 吉', label: 'GENKICHI · MYSTIC HARMONY', season: 'aki' },
+  { text: 'May art, poetry, and song continue to mend broken hearts.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'haru' },
+  { text: 'For harmony between the mountain, the restless ocean, and all living souls.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'fuyu' },
+  { text: 'Wishing that those who wander in darkness may glimpse a guiding light.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'natsu' },
+  { text: 'A sincere wish for forgiveness, release of burdens, and a light heart.', rank: '玄 吉', label: 'GENKICHI · MYSTIC HARMONY', season: 'aki' },
+  { text: 'May good fortune follow quiet beginnings and patient roots.', rank: '中 吉', label: 'CHŪKICHI · SERENE FORTUNE', season: 'haru' },
+  { text: 'Hoping that tomorrow’s dawn brings unexpected solace.', rank: '末 吉', label: 'SUEKICHI · DAWNING GRACE', season: 'fuyu' },
+  { text: 'Deep gratitude for the silent gifts of this fleeting life.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'aki' },
+  { text: 'May love outlast distance and keep the hearth fires burning.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'fuyu' },
+  { text: 'Wishing for calm waters and clear stars on the voyage ahead.', rank: '中 吉', label: 'CHŪKICHI · SERENE FORTUNE', season: 'natsu' },
+  { text: 'May every whisper entrusted to this flame find an open ear in heaven.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'haru' },
+  { text: 'Peace to the departed spirits resting beneath the eternal starlight.', rank: '玄 吉', label: 'GENKICHI · MYSTIC HARMONY', season: 'fuyu' },
+];
 
 export interface UIStatusSnapshot {
   portalStage: number;
@@ -36,6 +86,7 @@ export interface UIStatusSnapshot {
   isHoveringGate: boolean;
   season: SeasonId;
   userLanternCount: number;
+  selectedLantern: LanternInstance | null;
 }
 
 class ExperienceStore {
@@ -69,7 +120,7 @@ class ExperienceStore {
   wishBurstTime = -100.0;
   wishBurstOrigin = new THREE.Vector3(0, 0.35, -16.5);
 
-  // Cursor / pointer tracking for O(1) water ripples & lantern spawning
+  // Cursor / pointer tracking for O(1) water ripples & lantern raycast
   pointerNDC = new THREE.Vector2(0, 0);
   smoothedPointerNDC = new THREE.Vector2(0, 0);
   waterHitPoint = new THREE.Vector3(0, 0, 1000);
@@ -87,10 +138,19 @@ class ExperienceStore {
   rippleCursor = 0;
   lastRippleSpawnTime = 0;
 
-  // Pool of Floating Water Lanterns (Tōrō Nagashi) in Kakuriyo
+  // Pool of Floating Water Lanterns (Tōrō Nagashi) in Kakuriyo: Exactly 25 maximum (FIFO ring buffer)
   lanterns: LanternInstance[] = [];
-  nextUserLanternSlot = AMBIENT_LANTERN_COUNT;
+  oldestSlot = 0; // Index of the oldest lantern to be overwritten by the next wish
   userLanternCount = 0;
+
+  // Click & inspection interaction
+  selectedLantern: LanternInstance | null = null;
+  hoveredLanternId: number | null = null;
+  cameraRef: THREE.Camera | null = null;
+  private hitRaycaster = new THREE.Raycaster();
+  private hitNdcVec = new THREE.Vector2();
+  private hitTempVec = new THREE.Vector3();
+  private hitCenterVec = new THREE.Vector3();
 
   elapsedTime = 0;
   hasInteracted = false;
@@ -103,6 +163,7 @@ class ExperienceStore {
   private lastEmittedHover = false;
   private lastEmittedSeason: SeasonId = 'haru';
   private lastEmittedLanterns = 0;
+  private lastEmittedSelectedId: number | null = null;
 
   constructor() {
     let rng = 20261031;
@@ -112,39 +173,34 @@ class ExperienceStore {
     };
 
     for (let i = 0; i < MAX_LANTERNS; i++) {
-      if (i < AMBIENT_LANTERN_COUNT) {
-        // Arrange ambient lanterns along a sacred perspective avenue flanking the Hokora Shrine
-        const side = i % 2 === 0 ? -1 : 1;
-        const depthT = i / AMBIENT_LANTERN_COUNT;
-        const z = -13.8 - depthT * 19.5 - rand() * 1.8;
-        const laneSpread = 3.35 + rand() * 7.4 + depthT * 2.4;
-        const x = side * laneSpread + (rand() - 0.5) * 0.9;
-        this.lanterns.push({
-          active: true,
-          x,
-          z,
-          baseX: x,
-          driftPhase: rand() * Math.PI * 2,
-          driftSpeed: 0.065 + rand() * 0.065,
-          birthTime: 0,
-          staggerOrder: depthT * 0.75 + rand() * 0.25,
-          isUserSpawned: false,
-          isGoldenWish: false,
-        });
-      } else {
-        this.lanterns.push({
-          active: false,
-          x: 0,
-          z: -100,
-          baseX: 0,
-          driftPhase: rand() * Math.PI * 2,
-          driftSpeed: 0.08 + rand() * 0.05,
-          birthTime: -100,
-          staggerOrder: rand() * 0.3,
-          isUserSpawned: true,
-          isGoldenWish: false,
-        });
-      }
+      // Arrange 25 lanterns along a sacred perspective avenue flanking the Hokora Shrine
+      const side = i % 2 === 0 ? -1 : 1;
+      const depthT = i / MAX_LANTERNS;
+      const z = -13.8 - depthT * 19.5 - rand() * 1.8;
+      const laneSpread = 3.35 + rand() * 7.4 + depthT * 2.4;
+      const x = side * laneSpread + (rand() - 0.5) * 0.9;
+      const seedPrayer = INITIAL_PILGRIM_PRAYERS[i % INITIAL_PILGRIM_PRAYERS.length];
+
+      this.lanterns.push({
+        id: -(i + 1),
+        active: true,
+        x,
+        z,
+        baseX: x,
+        driftPhase: rand() * Math.PI * 2,
+        driftSpeed: 0.065 + rand() * 0.065,
+        birthTime: 0,
+        staggerOrder: depthT * 0.75 + rand() * 0.25,
+        isUserSpawned: false,
+        isGoldenWish: false,
+        wishText: seedPrayer.text,
+        authorName: 'Anonymous Pilgrim',
+        season: seedPrayer.season,
+        omikujiRank: seedPrayer.rank,
+        omikujiLabel: seedPrayer.label,
+        omikujiVerse: '',
+        createdAt: new Date().toISOString(),
+      });
     }
   }
 
@@ -180,6 +236,7 @@ class ExperienceStore {
   returnToUtsushiyo() {
     if (!this.isPortalOpenTarget) return;
     this.isPortalOpenTarget = false;
+    this.selectedLantern = null;
     this.hasInteracted = true;
     this.clickShockwave = 0.52;
     this.clickShockwaveTime = this.elapsedTime;
@@ -194,6 +251,68 @@ class ExperienceStore {
       this.enterKakuriyo();
     }
     return this.isPortalOpenTarget;
+  }
+
+  selectLantern(l: LanternInstance | null) {
+    this.selectedLantern = l;
+    this.emitSnapshot(true);
+  }
+
+  setHoveredLantern(id: number | null) {
+    this.hoveredLanternId = id;
+  }
+
+  /**
+   * High-speed analytical raycaster testing pointer against 25 floating lanterns.
+   * Tests both 3D sphere proximity to lantern center AND water plane intersection.
+   */
+  findLanternAtScreen(
+    clientX: number,
+    clientY: number,
+    screenWidth: number,
+    screenHeight: number
+  ): LanternInstance | null {
+    if (!this.cameraRef || this.travelProgress < 0.75) return null;
+
+    const nx = (clientX / Math.max(1, screenWidth)) * 2 - 1;
+    const ny = -(clientY / Math.max(1, screenHeight)) * 2 + 1;
+
+    this.hitNdcVec.set(nx, ny);
+    this.hitRaycaster.setFromCamera(this.hitNdcVec, this.cameraRef);
+    const ray = this.hitRaycaster.ray;
+
+    let bestCandidate: LanternInstance | null = null;
+    let closestDistAlongRay = Infinity;
+    const clickTolerance = 0.58; // Generous 58cm bounding hit sphere around lantern
+
+    for (let i = 0; i < MAX_LANTERNS; i++) {
+      const l = this.lanterns[i];
+      if (!l.active) continue;
+
+      const waveY = evalOceanWaveHeight(l.x, l.z, this.elapsedTime);
+      this.hitCenterVec.set(l.x, waveY + 0.24, l.z);
+
+      // Distance from ray line to lantern center point
+      const perpDist = ray.distanceToPoint(this.hitCenterVec);
+
+      // Also check water hit point distance if available
+      const waterDist = this.hasWaterHit
+        ? Math.hypot(this.waterHitPoint.x - l.x, this.waterHitPoint.z - l.z)
+        : Infinity;
+
+      if (perpDist <= clickTolerance || waterDist <= 0.62) {
+        this.hitTempVec.subVectors(this.hitCenterVec, ray.origin);
+        const forwardProj = ray.direction.dot(this.hitTempVec);
+
+        // Make sure lantern is in front of camera and pick closest along ray
+        if (forwardProj > 0 && forwardProj < closestDistAlongRay) {
+          closestDistAlongRay = forwardProj;
+          bestCandidate = l;
+        }
+      }
+    }
+
+    return bestCandidate;
   }
 
   /**
@@ -224,14 +343,13 @@ class ExperienceStore {
   /**
    * Hydrates persisted golden wish lanterns from the SQLite database onto the Kakuriyo sea.
    */
-  hydrateSavedWishes(records: { pos_x: number; pos_z: number }[], totalCount: number) {
-    const maxSlots = MAX_LANTERNS - AMBIENT_LANTERN_COUNT;
-    const slice = records.slice(0, maxSlots);
+  hydrateSavedWishes(records: WishLanternSlot[], totalCount: number) {
+    const slice = records.slice(0, MAX_LANTERNS);
     for (let i = 0; i < slice.length; i++) {
       const rec = slice[i];
       const safe = this.sanitizeLanternCoords(rec.pos_x, rec.pos_z);
-      const slotIdx = AMBIENT_LANTERN_COUNT + i;
-      const slot = this.lanterns[slotIdx];
+      const slot = this.lanterns[i];
+      slot.id = rec.id;
       slot.active = true;
       slot.x = safe.x;
       slot.baseX = safe.x;
@@ -240,20 +358,41 @@ class ExperienceStore {
       slot.staggerOrder = 0.12 + (i / Math.max(1, slice.length)) * 0.55;
       slot.isUserSpawned = true;
       slot.isGoldenWish = true;
+      slot.wishText = rec.wish_text;
+      slot.authorName = rec.author_name || 'Anonymous';
+      slot.season = rec.season || 'haru';
+      slot.omikujiRank = rec.omikuji_rank || '吉';
+      slot.omikujiLabel = rec.omikuji_label || 'KICHI · AUSPICIOUS TIDE';
+      slot.omikujiVerse = rec.omikuji_verse || '';
+      slot.createdAt = rec.created_at;
     }
-    this.nextUserLanternSlot =
-      AMBIENT_LANTERN_COUNT + (slice.length % maxSlots);
+
+    // Set ring buffer insertion slot so new wishes overwrite the oldest slot
+    this.oldestSlot = slice.length % MAX_LANTERNS;
     this.userLanternCount = Math.max(this.userLanternCount, totalCount);
     this.emitSnapshot(true);
   }
 
   /**
-   * Spawns a floating Tōrō candle lantern rising up from beneath the spirit sea in Kakuriyo.
+   * Spawns a floating golden Tōrō candle lantern rising up from beneath the spirit sea in Kakuriyo.
+   * Only called via "Make a Wish" (1 wish = 1 lantern).
+   * Strictly enforces MAX_LANTERNS = 25: FIFO ring buffer overwrites the oldest lantern!
    */
-  spawnUserLantern(x: number, z: number, isGoldenWish = false): { x: number; z: number } {
-    const { x: clampedX, z: clampedZ } = this.sanitizeLanternCoords(x, z);
+  spawnWishLantern(
+    wishText: string,
+    omikujiRank = '吉',
+    omikujiLabel = 'KICHI · AUSPICIOUS TIDE',
+    omikujiVerse = '',
+    season: SeasonId = 'haru'
+  ): { x: number; z: number; slotIndex: number; lantern: LanternInstance } {
+    const rawX = (Math.random() - 0.5) * 5.2;
+    const rawZ = -15.4 - Math.random() * 2.0;
+    const { x: clampedX, z: clampedZ } = this.sanitizeLanternCoords(rawX, rawZ);
 
-    const slot = this.lanterns[this.nextUserLanternSlot];
+    const slotIndex = this.oldestSlot;
+    const slot = this.lanterns[slotIndex];
+
+    slot.id = Date.now();
     slot.active = true;
     slot.x = clampedX;
     slot.baseX = clampedX;
@@ -261,25 +400,28 @@ class ExperienceStore {
     slot.birthTime = this.elapsedTime;
     slot.staggerOrder = 0.0;
     slot.isUserSpawned = true;
-    slot.isGoldenWish = isGoldenWish;
+    slot.isGoldenWish = true;
+    slot.wishText = wishText;
+    slot.authorName = 'Anonymous';
+    slot.season = season;
+    slot.omikujiRank = omikujiRank;
+    slot.omikujiLabel = omikujiLabel;
+    slot.omikujiVerse = omikujiVerse;
+    slot.createdAt = new Date().toISOString();
 
-    this.nextUserLanternSlot =
-      AMBIENT_LANTERN_COUNT +
-      ((this.nextUserLanternSlot - AMBIENT_LANTERN_COUNT + 1) %
-        (MAX_LANTERNS - AMBIENT_LANTERN_COUNT));
+    // FIFO ring buffer advances to next oldest slot (0..24)
+    this.oldestSlot = (this.oldestSlot + 1) % MAX_LANTERNS;
     this.userLanternCount += 1;
 
-    this.spawnRipple(clampedX, clampedZ, this.elapsedTime, isGoldenWish ? 1.35 : 0.95);
+    this.spawnRipple(clampedX, clampedZ, this.elapsedTime, 1.45);
 
-    if (isGoldenWish) {
-      this.wishBurstTime = this.elapsedTime;
-      this.wishBurstOrigin.set(clampedX, 0.32, clampedZ);
-      this.clickShockwave = 0.65;
-      this.clickShockwaveTime = this.elapsedTime;
-    }
+    this.wishBurstTime = this.elapsedTime;
+    this.wishBurstOrigin.set(clampedX, 0.35, clampedZ);
+    this.clickShockwave = 0.65;
+    this.clickShockwaveTime = this.elapsedTime;
 
     this.emitSnapshot(true);
-    return { x: clampedX, z: clampedZ };
+    return { x: clampedX, z: clampedZ, slotIndex, lantern: slot };
   }
 
   private emitSnapshot(force = false) {
@@ -292,6 +434,8 @@ class ExperienceStore {
       (this.isPortalOpenTarget && this.travelProgress < 0.96) ||
       (!this.isPortalOpenTarget && (this.travelProgress > 0.02 || this.portalProgress > 0.04));
 
+    const currentSelectedId = this.selectedLantern ? this.selectedLantern.id : null;
+
     if (
       force ||
       stage !== this.lastEmittedStage ||
@@ -300,7 +444,8 @@ class ExperienceStore {
       isTransitioning !== this.lastEmittedTransition ||
       this.isHoveringGate !== this.lastEmittedHover ||
       this.season !== this.lastEmittedSeason ||
-      this.userLanternCount !== this.lastEmittedLanterns
+      this.userLanternCount !== this.lastEmittedLanterns ||
+      currentSelectedId !== this.lastEmittedSelectedId
     ) {
       this.lastEmittedStage = stage;
       this.lastEmittedToggled = this.isPortalOpenTarget;
@@ -309,6 +454,7 @@ class ExperienceStore {
       this.lastEmittedHover = this.isHoveringGate;
       this.lastEmittedSeason = this.season;
       this.lastEmittedLanterns = this.userLanternCount;
+      this.lastEmittedSelectedId = currentSelectedId;
 
       const snap: UIStatusSnapshot = {
         portalStage: stage,
@@ -319,6 +465,7 @@ class ExperienceStore {
         isHoveringGate: this.isHoveringGate,
         season: this.season,
         userLanternCount: this.userLanternCount,
+        selectedLantern: this.selectedLantern,
       };
       this.listeners.forEach((fn) => fn(snap));
     }
@@ -389,7 +536,7 @@ class ExperienceStore {
       }
     }
 
-    // 3. Gentle ocean current drift for Tōrō water lanterns (parting naturally around Hokora island!)
+    // 3. Gentle ocean current drift for 25 Tōrō water lanterns (parting naturally around Hokora island!)
     if (this.lanternEmergence > 0.005) {
       for (let i = 0; i < MAX_LANTERNS; i++) {
         const l = this.lanterns[i];

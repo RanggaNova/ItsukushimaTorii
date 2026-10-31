@@ -89,6 +89,7 @@ export function MinimalUI({ ready }: { ready: boolean }) {
     isHoveringGate: false,
     season: 'haru',
     userLanternCount: 0,
+    selectedLantern: null,
   });
 
   useEffect(() => {
@@ -155,6 +156,7 @@ export function MinimalUI({ ready }: { ready: boolean }) {
     e.stopPropagation();
     setWishModalOpen(false);
     setActiveBlessing(null);
+    experienceState.selectLantern(null);
     experienceState.returnToUtsushiyo();
     soundEngine.triggerDimensionalPulse();
   };
@@ -162,6 +164,7 @@ export function MinimalUI({ ready }: { ready: boolean }) {
   const handleOpenWishModal = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     setActiveBlessing(null);
+    experienceState.selectLantern(null);
     setWishModalOpen(true);
   };
 
@@ -171,28 +174,33 @@ export function MinimalUI({ ready }: { ready: boolean }) {
     const displayWish =
       trimmedWish.length > 0 ? trimmedWish : 'A silent prayer offered to the eternal sea';
 
-    const rawSpawnX = (Math.random() - 0.5) * 5.2;
-    const rawSpawnZ = -15.4 - Math.random() * 2.0;
-    const spawnedCoords = experienceState.spawnUserLantern(rawSpawnX, rawSpawnZ, true);
-    soundEngine.triggerLanternBell(true);
-
     const chosen =
       OMIKUJI_BLESSINGS[
         (experienceState.userLanternCount + displayWish.length) % OMIKUJI_BLESSINGS.length
       ];
 
+    // Spawn 1 golden lantern in the spirit realm, overwriting oldest if 25 slots reached!
+    const { x: spawnedX, z: spawnedZ } = experienceState.spawnWishLantern(
+      displayWish,
+      chosen.rankKanji,
+      chosen.rankLabel,
+      chosen.verse,
+      status.season
+    );
+    soundEngine.triggerLanternBell(true);
+
     setWishText('');
     setDissolvingWish(displayWish);
 
-    // Silently persist wish into backend SQLite database (data/wishes.sqlite) for developer-only access
+    // Silently persist wish into backend SQLite database (data/wishes.sqlite)
     void saveWishToDatabase({
       wish_text: displayWish,
       season: status.season,
       omikuji_rank: chosen.rankKanji,
       omikuji_label: chosen.rankLabel,
       omikuji_verse: chosen.verse,
-      pos_x: spawnedCoords.x,
-      pos_z: spawnedCoords.z,
+      pos_x: spawnedX,
+      pos_z: spawnedZ,
     });
 
     window.setTimeout(() => {
@@ -204,16 +212,13 @@ export function MinimalUI({ ready }: { ready: boolean }) {
   const isDarkAtmosphere =
     status.isToggledDark || status.portalStage >= 3 || status.isInsideKakuriyo;
   const showDarkVerse =
-    status.isInsideKakuriyo && status.isToggledDark && !wishModalOpen;
+    status.isInsideKakuriyo && status.isToggledDark && !wishModalOpen && !status.selectedLantern;
   const activeSeasonMeta = SEASONS.find((s) => s.id === status.season) || SEASONS[0];
 
   let whisperLabel = 'CLICK ONCE TO ENTER THE GATE';
   if (status.isToggledDark) {
     if (status.isInsideKakuriyo) {
-      whisperLabel =
-        status.userLanternCount > 0
-          ? `CLICK WATER TO FLOAT A LANTERN · ${status.userLanternCount} LIT`
-          : 'CLICK THE WATER TO FLOAT A LANTERN';
+      whisperLabel = 'CLICK A FLOATING LANTERN TO REVEAL A PRAYER';
     } else {
       whisperLabel = 'CROSSING THE SACRED THRESHOLD';
     }
@@ -357,6 +362,40 @@ export function MinimalUI({ ready }: { ready: boolean }) {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Floating Lantern Prayer Inspection Modal (reveals the prayer carried by any clicked lantern) */}
+      {status.selectedLantern && !wishModalOpen && (
+        <div
+          className="oracle-backdrop"
+          data-ui-interactive="true"
+          onClick={() => experienceState.selectLantern(null)}
+        >
+          <div className="oracle-card lantern-prayer-card" onClick={(e) => e.stopPropagation()}>
+            <span className="oracle-eyebrow">流 燈 の 祈 り · PRAYER OF THE DRIFTING LANTERN</span>
+            <div className="prayer-quote-wrap">
+              <p className="prayer-text">“{status.selectedLantern.wishText}”</p>
+            </div>
+            {status.selectedLantern.omikujiRank && (
+              <div className="prayer-blessing-badge">
+                <span className="prayer-badge-kanji">{status.selectedLantern.omikujiRank}</span>
+                <span className="prayer-badge-label">{status.selectedLantern.omikujiLabel}</span>
+              </div>
+            )}
+            <div className="prayer-meta-line">
+              <span>Offered with reverence to the Hokora Sanctuary</span>
+            </div>
+            <div className="oracle-form-actions">
+              <button
+                type="button"
+                className="oracle-submit-btn"
+                onClick={() => experienceState.selectLantern(null)}
+              >
+                LET IT DRIFT
+              </button>
+            </div>
           </div>
         </div>
       )}
