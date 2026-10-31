@@ -114,11 +114,14 @@ class ExperienceStore {
   // Click & inspection interaction
   selectedLantern: LanternInstance | null = null;
   hoveredLanternId: number | null = null;
+  draggedLantern: LanternInstance | null = null;
   cameraRef: THREE.Camera | null = null;
   private hitRaycaster = new THREE.Raycaster();
   private hitNdcVec = new THREE.Vector2();
   private hitTempVec = new THREE.Vector3();
   private hitCenterVec = new THREE.Vector3();
+  private hitPlaneIntersectVec = new THREE.Vector3();
+  private seaPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
   elapsedTime = 0;
   hasInteracted = false;
@@ -224,9 +227,36 @@ class ExperienceStore {
     this.hoveredLanternId = id;
   }
 
+  startDraggingLantern(lantern: LanternInstance) {
+    this.draggedLantern = lantern;
+    document.body.style.cursor = 'grabbing';
+  }
+
+  dragCurrentLantern(waterX: number, waterZ: number) {
+    if (!this.draggedLantern) return;
+    const safe = this.sanitizeLanternCoords(waterX, waterZ);
+    this.draggedLantern.x = safe.x;
+    this.draggedLantern.baseX = safe.x;
+    this.draggedLantern.z = safe.z;
+
+    // Emit gentle ripples as lantern glides through water
+    const now = this.elapsedTime;
+    if (now - this.lastRippleSpawnTime > 0.08) {
+      this.spawnRipple(safe.x, safe.z, now, 0.42);
+    }
+  }
+
+  stopDraggingLantern() {
+    if (this.draggedLantern) {
+      this.draggedLantern.baseX = this.draggedLantern.x;
+      this.draggedLantern = null;
+    }
+    document.body.style.cursor = 'default';
+  }
+
   /**
-   * High-speed analytical raycaster testing pointer against 25 floating lanterns.
-   * Tests both 3D sphere proximity to lantern center AND water plane intersection.
+   * High-speed analytical raycaster testing pointer against floating lanterns.
+   * Uses generous touch tolerance on mobile devices for easy finger grabbing.
    */
   findLanternAtScreen(
     clientX: number,
@@ -245,7 +275,10 @@ class ExperienceStore {
 
     let bestCandidate: LanternInstance | null = null;
     let closestDistAlongRay = Infinity;
-    const clickTolerance = 0.58; // Generous 58cm bounding hit sphere around lantern
+
+    const isMobile = screenWidth / Math.max(1, screenHeight) < 1.15;
+    const clickTolerance = isMobile ? 0.95 : 0.65;
+    const waterDistTolerance = isMobile ? 1.05 : 0.70;
 
     for (let i = 0; i < MAX_LANTERNS; i++) {
       const l = this.lanterns[i];
@@ -262,7 +295,7 @@ class ExperienceStore {
         ? Math.hypot(this.waterHitPoint.x - l.x, this.waterHitPoint.z - l.z)
         : Infinity;
 
-      if (perpDist <= clickTolerance || waterDist <= 0.62) {
+      if (perpDist <= clickTolerance || waterDist <= waterDistTolerance) {
         this.hitTempVec.subVectors(this.hitCenterVec, ray.origin);
         const forwardProj = ray.direction.dot(this.hitTempVec);
 
@@ -278,32 +311,54 @@ class ExperienceStore {
   }
 
   /**
-   * Keeps floating water lanterns gently outside the granite Hokora shrine island perimeter.
+   * Raycasts any screen (clientX, clientY) coordinate to the sea water plane (y = 0).
    */
-  private sanitizeLanternCoords(x: number, z: number): { x: number; z: number } {
-    let cx = THREE.MathUtils.clamp(x, -15.0, 15.0);
-    let cz = THREE.MathUtils.clamp(z, -29.5, -12.6);
-    const dx = cx;
-    const dz = cz - HOKORA_SANCTUARY_Z;
-    const dist = Math.hypot(dx, dz);
-    const minIslandClearance = 2.15;
-    if (dist < minIslandClearance) {
-      if (dist < 0.05) {
-        cz = HOKORA_SANCTUARY_Z + minIslandClearance;
+  getWaterPlanePointAtScreen(
+    clientX: number,
+    clientY: number,
+    screenWidth: number,
+    screenHeight: number
+  ): { x: number; z: number } | null {
+    if (!this.cameraRef) return null;
+    const nx = (clientX / Math.max(1, screenWidth)) * 2 - 1;
+    const ny = -(clientY / Math.max(1, screenHeight)) * 2 + 1;
+    this.hitNdcVec.set(nx, ny);
+    this.hitRaycaster.setFromCamera(this.hitNdcVec, this.cameraRef);
+    const hit = this.hitRaycaster.ray.intersectPlane(this.seaPlane, this.hitPlaneIntersectVec);
+    if (hit) {
+      return { x: hit.x, z: hit.z };
+    }
+    return null;
+  }
+
+  /**
+   * Keeps floating water lanterns safely within the visible lagoon
+   * and gently outside the granite Hokora shrine foundation.
+   */
+  sanitizeLanternCoords(x: number, z: number): { x: number; z: number } {
+    let cx = THREE.MathUtils.clamp(x, -14.0, 14.0);
+    let cz = THREE.MathUtils.clamp(z, -28.5, -11.0);
+
+    // Granite foundation box is roughly |x| < 1.15, z between -21.4 and -18.9
+    const inGraniteX = Math.abs(cx) < 1.15;
+    const inGraniteZ = cz < -18.9 && cz > -21.4;
+    if (inGraniteX && inGraniteZ) {
+      if (cz > -20.15) {
+        cz = -18.85; // Stay in front of the shrine
       } else {
-        const scale = minIslandClearance / dist;
-        cx = dx * scale;
-        cz = HOKORA_SANCTUARY_Z + dz * scale;
+        cx = cx >= 0 ? 1.20 : -1.20; // Slip to the left or right side
       }
     }
+
     return {
-      x: THREE.MathUtils.clamp(cx, -15.0, 15.0),
-      z: THREE.MathUtils.clamp(cz, -29.5, -12.6),
+      x: THREE.MathUtils.clamp(cx, -14.0, 14.0),
+      z: THREE.MathUtils.clamp(cz, -28.5, -11.0),
     };
   }
 
   /**
-   * Hydrates persisted golden wish lanterns from the SQLite database onto the Kakuriyo sea.
+   * Hydrates persisted golden wish lanterns from the database onto the Kakuriyo sea.
+   * Clamps older records horizontally so they are framed comfortably on mobile screens.
    */
   hydrateSavedWishes(records: WishLanternSlot[], totalCount: number) {
     // Reset all slots first so no old/stale lanterns remain active
@@ -315,7 +370,9 @@ class ExperienceStore {
     const slice = records.slice(0, MAX_LANTERNS);
     for (let i = 0; i < slice.length; i++) {
       const rec = slice[i];
-      const safe = this.sanitizeLanternCoords(rec.pos_x, rec.pos_z);
+      // Keep within [-1.8, 1.8] to guarantee visibility on mobile portrait
+      const clampedX = THREE.MathUtils.clamp(rec.pos_x, -1.8, 1.8);
+      const safe = this.sanitizeLanternCoords(clampedX, rec.pos_z);
       const slot = this.lanterns[i];
       slot.id = rec.id;
       slot.active = true;
@@ -353,8 +410,9 @@ class ExperienceStore {
     omikujiVerse = '',
     season: SeasonId = 'haru'
   ): { x: number; z: number; slotIndex: number; lantern: LanternInstance } {
-    const rawX = (Math.random() - 0.5) * 5.2;
-    const rawZ = -15.4 - Math.random() * 2.0;
+    // Spawn prominently in the central visible water lane in front of the Hokora (framed on mobile & desktop)
+    const rawX = (Math.random() - 0.5) * 2.8;
+    const rawZ = -15.4 - Math.random() * 2.2;
     const { x: clampedX, z: clampedZ } = this.sanitizeLanternCoords(rawX, rawZ);
 
     const slotIndex = this.oldestSlot;
@@ -513,11 +571,12 @@ class ExperienceStore {
       for (let i = 0; i < MAX_LANTERNS; i++) {
         const l = this.lanterns[i];
         if (!l.active) continue;
+        if (l === this.draggedLantern) continue; // Don't apply auto-drift to the lantern being actively dragged!
         l.z -= l.driftSpeed * clampedDt;
         const candidateX = l.baseX + Math.sin(elapsed * 0.32 + l.driftPhase) * 0.50;
         const dzIsland = l.z - HOKORA_SANCTUARY_Z;
-        const distIsland = Math.hypot(candidateX, dzIsland);
-        if (distIsland < 3.45) {
+        // Only deflect if lantern actually nears the physical granite Hokora base (|dz| < 1.25 & |x| < 1.15)
+        if (Math.abs(dzIsland) < 1.25 && Math.abs(candidateX) < 1.15) {
           const pushSide = l.baseX >= 0 ? 1 : -1;
           l.baseX += pushSide * 0.85 * clampedDt;
         }

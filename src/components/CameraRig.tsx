@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { experienceState } from '../state/experienceState';
+import { experienceState, HOKORA_SANCTUARY_Z } from '../state/experienceState';
 import { soundEngine } from '../audio/SoundEngine';
 
 const SEA_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -55,6 +55,10 @@ export function CameraRig() {
 
       // Check hover over floating lanterns in Kakuriyo to provide intuitive pointer cursor
       if (experienceState.travelProgress > 0.78 && experienceState.isPortalOpenTarget) {
+        if (experienceState.draggedLantern) {
+          document.body.style.cursor = 'grabbing';
+          return;
+        }
         const hovered = experienceState.findLanternAtScreen(
           e.clientX,
           e.clientY,
@@ -62,7 +66,7 @@ export function CameraRig() {
           window.innerHeight
         );
         if (hovered) {
-          document.body.style.cursor = 'pointer';
+          document.body.style.cursor = 'grab';
           experienceState.setHoveredLantern(hovered.id);
         } else {
           document.body.style.cursor = 'default';
@@ -101,8 +105,17 @@ export function CameraRig() {
 
     // Fixed front-centered composition (NO cursor rotation!), with seamless Dolly-Through flight
     const aspect = size.width / Math.max(1, size.height);
+    const isPortrait = aspect < 1.15;
     const outerBaseZ = aspect < 1.2 ? 19.5 / Math.max(0.50, aspect * 0.85) : 19.5;
-    const innerSanctuaryZ = -10.5;
+
+    // Responsive Kakuriyo Sanctuary framing:
+    // On portrait mobile (aspect ~0.40 - 0.75), pull camera back away from Hokora (-20.2)
+    // and elevate slightly with downward pitch so the wide water expanse & floating lanterns
+    // are framed prominently in the lower-middle screen, well above the bottom buttons.
+    const portraitFactor = isPortrait ? Math.min(1.85, 0.95 / Math.max(0.38, aspect)) : 1.0;
+    const innerSanctuaryZ = HOKORA_SANCTUARY_Z + 9.7 * portraitFactor;
+    const innerCamY = isPortrait ? 2.42 : 1.82;
+    const innerTargetY = isPortrait ? 1.30 : 1.42;
 
     const u = experienceState.travelProgress;
     // Cubic smoothstep S-curve for buttery dolly-in & dolly-back
@@ -112,7 +125,7 @@ export function CameraRig() {
     const breatheY = Math.sin(t * 0.38) * 0.022;
 
     const camZ = THREE.MathUtils.lerp(outerBaseZ, innerSanctuaryZ, ease) - shock * 0.45 * (1.0 - ease);
-    const camY = THREE.MathUtils.lerp(2.65, 1.82, ease) + breatheY;
+    const camY = THREE.MathUtils.lerp(2.65, innerCamY, ease) + breatheY;
 
     // Exact dimensional threshold warp intensity right as camera crosses the portal plane (z = 0)
     if (u > 0.01 && u < 0.99) {
@@ -124,7 +137,8 @@ export function CameraRig() {
     camera.position.set(0, camY, camZ);
 
     const persp = camera as THREE.PerspectiveCamera;
-    const targetFov = 42.0 + experienceState.warpIntensity * 6.5 + shock * 2.4;
+    const baseFov = isPortrait ? 46.0 : 42.0;
+    const targetFov = baseFov + experienceState.warpIntensity * 6.5 + shock * 2.4;
     if (Math.abs(persp.fov - targetFov) > 0.01) {
       persp.fov = THREE.MathUtils.lerp(persp.fov, targetFov, 0.14);
       persp.updateProjectionMatrix();
@@ -132,10 +146,10 @@ export function CameraRig() {
 
     // Look straight ahead (-Z) throughout the entire flight:
     // At Utsushiyo -> frames Torii (0, 2.55, 0)
-    // At Kakuriyo  -> frames grounded Hokora Shrine & Eternal Lantern Sea (0, 1.42, -20.2)
+    // At Kakuriyo  -> frames grounded Hokora Shrine & Eternal Lantern Sea (0, innerTargetY, -20.2)
     dynamicTarget.set(
       0,
-      THREE.MathUtils.lerp(2.55, 1.42, ease),
+      THREE.MathUtils.lerp(2.55, innerTargetY, ease),
       THREE.MathUtils.lerp(0.0, -20.2, ease)
     );
 

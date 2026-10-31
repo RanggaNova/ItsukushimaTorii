@@ -11,7 +11,7 @@ import { KakuriyoSanctuary } from './components/KakuriyoSanctuary';
 import { InteractiveOcean } from './components/InteractiveOcean';
 import { CameraRig } from './components/CameraRig';
 import { MinimalUI } from './components/MinimalUI';
-import { experienceState } from './state/experienceState';
+import { experienceState, LanternInstance } from './state/experienceState';
 import { soundEngine } from './audio/SoundEngine';
 
 function SceneContent({ onLoaded }: { onLoaded: () => void }) {
@@ -38,6 +38,9 @@ function SceneContent({ onLoaded }: { onLoaded: () => void }) {
 export default function App() {
   const [ready, setReady] = useState(false);
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
+  const dragTargetRef = useRef<LanternInstance | null>(null);
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isDraggingRef = useRef(false);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -50,6 +53,56 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // Global window tracking for buttery-smooth mouse and touch dragging across the entire screen
+  useEffect(() => {
+    const onWindowPointerMove = (e: PointerEvent) => {
+      if (!dragTargetRef.current || !dragStartPosRef.current) return;
+      const dx = e.clientX - dragStartPosRef.current.x;
+      const dy = e.clientY - dragStartPosRef.current.y;
+      if (Math.hypot(dx, dy) >= 6) {
+        isDraggingRef.current = true;
+      }
+      if (isDraggingRef.current) {
+        const pt = experienceState.getWaterPlanePointAtScreen(
+          e.clientX,
+          e.clientY,
+          window.innerWidth,
+          window.innerHeight
+        );
+        if (pt) {
+          experienceState.dragCurrentLantern(pt.x, pt.z);
+        }
+      }
+    };
+
+    const onWindowPointerUp = (e: PointerEvent) => {
+      if (!dragTargetRef.current) return;
+      const wasDragging = isDraggingRef.current;
+      const targetLantern = dragTargetRef.current;
+
+      experienceState.stopDraggingLantern();
+      dragTargetRef.current = null;
+      dragStartPosRef.current = null;
+      isDraggingRef.current = false;
+      pointerDownRef.current = null;
+
+      if (!wasDragging) {
+        // Quick tap without movement -> reveal sacred prayer carried within!
+        experienceState.selectLantern(targetLantern);
+        soundEngine.triggerLanternBell(true);
+      }
+    };
+
+    window.addEventListener('pointermove', onWindowPointerMove, { passive: true });
+    window.addEventListener('pointerup', onWindowPointerUp);
+    window.addEventListener('pointercancel', onWindowPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', onWindowPointerMove);
+      window.removeEventListener('pointerup', onWindowPointerUp);
+      window.removeEventListener('pointercancel', onWindowPointerUp);
+    };
+  }, []);
+
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>) => {
     if ((e.target as HTMLElement)?.closest('[data-ui-interactive="true"], button, input, textarea, form')) {
       pointerDownRef.current = null;
@@ -57,9 +110,30 @@ export default function App() {
     }
     if (e.button !== undefined && e.button !== 0) return;
     pointerDownRef.current = { x: e.clientX, y: e.clientY };
+
+    // In Kakuriyo, test if user tapped or grabbed a floating lantern
+    if (experienceState.travelProgress > 0.75 && experienceState.isPortalOpenTarget) {
+      const hitLantern = experienceState.findLanternAtScreen(
+        e.clientX,
+        e.clientY,
+        window.innerWidth,
+        window.innerHeight
+      );
+      if (hitLantern) {
+        dragTargetRef.current = hitLantern;
+        dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+        isDraggingRef.current = false;
+        experienceState.startDraggingLantern(hitLantern);
+      }
+    }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLElement>) => {
+    if (dragTargetRef.current) {
+      // Handled by window pointerup listener
+      return;
+    }
+
     if (!pointerDownRef.current) return;
     if ((e.target as HTMLElement)?.closest('[data-ui-interactive="true"], button, input, textarea, form')) {
       pointerDownRef.current = null;
@@ -78,27 +152,14 @@ export default function App() {
       experienceState.enterKakuriyo();
       soundEngine.triggerDimensionalPulse();
     } else if (experienceState.travelProgress > 0.78) {
-      // Inside Kakuriyo: clicking a floating lantern reveals the sacred prayer/wish carried within it!
-      const hitLantern = experienceState.findLanternAtScreen(
-        e.clientX,
-        e.clientY,
-        window.innerWidth,
-        window.innerHeight
-      );
-
-      if (hitLantern) {
-        experienceState.selectLantern(hitLantern);
-        soundEngine.triggerLanternBell(true);
-      } else {
-        // Water clicks only create serene ripples — lanterns are ONLY released via Make a Wish!
-        if (experienceState.hasWaterHit) {
-          experienceState.spawnRipple(
-            experienceState.waterHitPoint.x,
-            experienceState.waterHitPoint.z,
-            experienceState.elapsedTime,
-            0.55
-          );
-        }
+      // Water clicks only create serene ripples — lanterns are ONLY released via Make a Wish!
+      if (experienceState.hasWaterHit) {
+        experienceState.spawnRipple(
+          experienceState.waterHitPoint.x,
+          experienceState.waterHitPoint.z,
+          experienceState.elapsedTime,
+          0.55
+        );
       }
     }
   };

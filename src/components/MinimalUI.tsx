@@ -221,7 +221,7 @@ export function MinimalUI({ ready }: { ready: boolean }) {
     if (status.isInsideKakuriyo) {
       whisperLabel =
         status.activeLanternCount > 0
-          ? `CLICK A FLOATING LANTERN TO REVEAL A PRAYER · ${status.activeLanternCount} DRIFTING`
+          ? `DRAG LANTERN TO MOVE · TAP TO REVEAL PRAYER · ${status.activeLanternCount} DRIFTING`
           : 'MAKE A WISH TO RELEASE A FLOATING LANTERN';
     } else {
       whisperLabel = 'CROSSING THE SACRED THRESHOLD';
