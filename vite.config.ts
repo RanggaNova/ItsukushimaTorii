@@ -124,7 +124,7 @@ function createWishDatabasePlugin(): Plugin {
         const authorName = 'Anonymous';
 
         const rawWish = typeof body.wish_text === 'string' ? body.wish_text.trim() : '';
-        const wishText = (rawWish || 'Doa hening yang dihanyutkan ke samudra abadi').slice(0, 140);
+        const wishText = (rawWish || 'A silent prayer offered to the eternal sea').slice(0, 140);
 
         const season =
           typeof body.season === 'string' && ['haru', 'natsu', 'aki', 'fuyu'].includes(body.season)

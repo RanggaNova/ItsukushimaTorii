@@ -10,14 +10,18 @@ interface HokoraShrineProps {
   visibilityRef: React.MutableRefObject<number>;
 }
 
-// Normalizes geometry + bakes realistic 3D Architectural Ambient Occlusion (Under-eave, coping & cavity AO!)
+type UVMappingMode = 'metric-stone' | 'metric-wood' | 'preserve';
+
+// Normalizes geometry + applies aspect-correct metric 3D UVs (eliminates texture stretching!)
+// + bakes realistic 3D Architectural Cavity Ambient Occlusion!
 function prepGeom(
   geom: THREE.BufferGeometry,
   r = 1.0,
   g = 1.0,
   b = 1.0,
   uvScale = 1.0,
-  applyArchAO = true
+  applyArchAO = true,
+  uvMode: UVMappingMode = 'metric-wood'
 ): THREE.BufferGeometry {
   const gNonIdx = geom.index ? geom.toNonIndexed() : geom.clone();
 
@@ -28,12 +32,23 @@ function prepGeom(
   }
 
   gNonIdx.computeVertexNormals();
+  gNonIdx.computeBoundingBox();
+  const bbox = gNonIdx.boundingBox!;
+  const spanX = bbox.max.x - bbox.min.x;
+  const spanY = bbox.max.y - bbox.min.y;
+  const spanZ = bbox.max.z - bbox.min.z;
+
   const pos = gNonIdx.attributes.position as THREE.BufferAttribute;
   const nrm = gNonIdx.attributes.normal as THREE.BufferAttribute;
   const count = pos.count;
 
-  if (!gNonIdx.attributes.uv) {
+  if (uvMode !== 'preserve' || !gNonIdx.attributes.uv) {
     const uvs = new Float32Array(count * 2);
+    // Align wood grain along the longest axis of beams/rails vs vertical posts!
+    const horizBeamX = uvMode === 'metric-wood' && spanX > spanY * 1.35 && spanX >= spanZ;
+    const horizBeamZ = uvMode === 'metric-wood' && spanZ > spanY * 1.35 && spanZ > spanX;
+    const baseDensity = uvMode === 'metric-stone' ? 1.75 * uvScale : 2.15 * uvScale;
+
     for (let i = 0; i < count; i++) {
       const px = pos.getX(i);
       const py = pos.getY(i);
@@ -41,16 +56,39 @@ function prepGeom(
       const nx = Math.abs(nrm.getX(i));
       const ny = Math.abs(nrm.getY(i));
       const nz = Math.abs(nrm.getZ(i));
+
+      let u = 0;
+      let v = 0;
       if (ny >= nx && ny >= nz) {
-        uvs[i * 2 + 0] = px * uvScale;
-        uvs[i * 2 + 1] = pz * uvScale;
+        // Top / bottom faces
+        if (horizBeamZ) {
+          u = px * baseDensity + 0.5;
+          v = pz * baseDensity + 0.5;
+        } else {
+          u = pz * baseDensity + 0.5;
+          v = px * baseDensity + 0.5;
+        }
       } else if (nx >= nz) {
-        uvs[i * 2 + 0] = pz * uvScale;
-        uvs[i * 2 + 1] = py * uvScale;
+        // Left / right faces
+        if (horizBeamZ) {
+          u = py * baseDensity;
+          v = pz * baseDensity + 0.5;
+        } else {
+          u = pz * baseDensity + 0.5;
+          v = py * baseDensity;
+        }
       } else {
-        uvs[i * 2 + 0] = px * uvScale;
-        uvs[i * 2 + 1] = py * uvScale;
+        // Front / back faces
+        if (horizBeamX) {
+          u = py * baseDensity;
+          v = px * baseDensity + 0.5;
+        } else {
+          u = px * baseDensity + 0.5;
+          v = py * baseDensity;
+        }
       }
+      uvs[i * 2 + 0] = u;
+      uvs[i * 2 + 1] = v;
     }
     gNonIdx.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   } else if (uvScale !== 1.0) {
@@ -64,27 +102,40 @@ function prepGeom(
   for (let i = 0; i < count; i++) {
     let ao = 1.0;
     if (applyArchAO) {
+      const px = pos.getX(i);
       const py = pos.getY(i);
       const pz = pos.getZ(i);
       const ny = nrm.getY(i);
 
-      // 1. Directional hemisphere self-occlusion (downward-facing overhangs are naturally shaded)
-      ao *= 0.76 + 0.24 * THREE.MathUtils.clamp(ny * 0.5 + 0.5, 0.0, 1.0);
+      // 1. Directional hemisphere self-occlusion (downward overhangs naturally shaded)
+      ao *= 0.72 + 0.28 * THREE.MathUtils.clamp(ny * 0.5 + 0.5, 0.0, 1.0);
 
-      // 2. Deep Noki-shita (Under-Eave) shadow tucked right beneath the wide copper roof (y = 1.04..1.24)
-      if (py > 0.98 && py < 1.24 && Math.abs(pz) < 0.44) {
-        const eaveFactor = Math.sin(((py - 0.98) / 0.26) * Math.PI);
-        ao *= 1.0 - 0.34 * eaveFactor;
+      // 2. Deep Noki-shita (Under-Eave) cavity AO tucked beneath the wide copper roof (y = 0.98..1.25)
+      if (py > 0.96 && py < 1.25 && Math.abs(pz) < 0.46) {
+        const eaveFactor = Math.sin(((py - 0.96) / 0.29) * Math.PI);
+        ao *= 1.0 - 0.42 * eaveFactor;
       }
 
-      // 3. Contact shadow right underneath the overhanging granite coping slab (y = 0.20..0.27)
-      if (py > 0.19 && py < 0.265) {
-        ao *= 0.78;
+      // 3. Contact AO tucked directly under the overhanging upper sanctuary deck (y = 0.53..0.595)
+      if (py > 0.52 && py < 0.595 && Math.abs(px) < 0.37 && Math.abs(pz) < 0.32) {
+        const underDeck = THREE.MathUtils.smoothstep(py, 0.52, 0.59);
+        ao *= 1.0 - 0.32 * underDeck;
       }
 
-      // 4. Waterline dampness darkening near the sea surface (y <= 0.05)
-      if (py < 0.06) {
-        ao *= THREE.MathUtils.lerp(0.54, 1.0, THREE.MathUtils.clamp((py + 0.08) / 0.14, 0.0, 1.0));
+      // 4. Contact AO right underneath the overhanging granite coping slab (y = 0.19..0.268)
+      if (py > 0.185 && py < 0.268) {
+        const underCoping = THREE.MathUtils.smoothstep(py, 0.185, 0.262);
+        ao *= 1.0 - 0.30 * underCoping;
+      }
+
+      // 5. Contact shadow behind the Saisen-bako coin box on the front granite face
+      if (pz > 0.42 && Math.abs(px) < 0.16 && py > 0.18 && py < 0.35) {
+        ao *= 0.80;
+      }
+
+      // 6. Waterline dampness darkening near the sea surface (y <= 0.06)
+      if (py < 0.07) {
+        ao *= THREE.MathUtils.lerp(0.48, 1.0, THREE.MathUtils.clamp((py + 0.08) / 0.15, 0.0, 1.0));
       }
     }
 
@@ -166,7 +217,7 @@ function createChrysanthemumCrest(radius: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const centerBoss = new THREE.SphereGeometry(radius * 0.24, 10, 8);
   centerBoss.scale(1.0, 1.0, 0.45);
-  parts.push(prepGeom(centerBoss, 1.08, 0.96, 0.76, 1.0, false));
+  parts.push(prepGeom(centerBoss, 1.08, 0.96, 0.76, 3.0, false));
 
   const petals = 16;
   for (let i = 0; i < petals; i++) {
@@ -175,7 +226,7 @@ function createChrysanthemumCrest(radius: number): THREE.BufferGeometry {
     petal.scale(0.32, 1.0, 0.26);
     petal.translate(0, radius * 0.54, 0);
     petal.rotateZ(ang);
-    parts.push(prepGeom(petal, 1.0, 0.90, 0.68, 1.0, false));
+    parts.push(prepGeom(petal, 1.0, 0.90, 0.68, 3.0, false));
   }
   return mergeGeometries(parts, false)!;
 }
@@ -188,21 +239,21 @@ function createScallopedCornerKanagu(cornerX: -1 | 1, cornerZ: -1 | 1): THREE.Bu
 
   const armX = new THREE.BoxGeometry(armLen, h, thick);
   armX.translate(-cornerX * (armLen * 0.5 - thick * 0.5), 0, cornerZ * (thick * 0.5));
-  parts.push(prepGeom(armX, 1.0, 0.92, 0.70, 1.0, false));
+  parts.push(prepGeom(armX, 1.0, 0.92, 0.70, 3.0, false));
 
   const cuspX = new THREE.CylinderGeometry(h * 0.36, h * 0.36, thick, 10);
   cuspX.rotateX(Math.PI / 2);
   cuspX.translate(-cornerX * (armLen - 0.006), 0, cornerZ * (thick * 0.5));
-  parts.push(prepGeom(cuspX, 1.02, 0.94, 0.72, 1.0, false));
+  parts.push(prepGeom(cuspX, 1.02, 0.94, 0.72, 3.0, false));
 
   const armZ = new THREE.BoxGeometry(thick, h, armLen);
   armZ.translate(cornerX * (thick * 0.5), 0, -cornerZ * (armLen * 0.5 - thick * 0.5));
-  parts.push(prepGeom(armZ, 1.0, 0.92, 0.70, 1.0, false));
+  parts.push(prepGeom(armZ, 1.0, 0.92, 0.70, 3.0, false));
 
   const cuspZ = new THREE.CylinderGeometry(h * 0.36, h * 0.36, thick, 10);
   cuspZ.rotateZ(Math.PI / 2);
   cuspZ.translate(cornerX * (thick * 0.5), 0, -cornerZ * (armLen - 0.006));
-  parts.push(prepGeom(cuspZ, 1.02, 0.94, 0.72, 1.0, false));
+  parts.push(prepGeom(cuspZ, 1.02, 0.94, 0.72, 3.0, false));
 
   const rivetOffsets = [0.022, 0.054, 0.080];
   for (let idx = 0; idx < rivetOffsets.length; idx++) {
@@ -211,11 +262,11 @@ function createScallopedCornerKanagu(cornerX: -1 | 1, cornerZ: -1 | 1): THREE.Bu
     for (const ry of ySpread) {
       const rvx = new THREE.SphereGeometry(0.0058, 7, 6);
       rvx.translate(-cornerX * off, ry, cornerZ * (thick + 0.002));
-      parts.push(prepGeom(rvx, 1.15, 1.02, 0.80, 1.0, false));
+      parts.push(prepGeom(rvx, 1.15, 1.02, 0.80, 3.0, false));
 
       const rvz = new THREE.SphereGeometry(0.0058, 7, 6);
       rvz.translate(cornerX * (thick + 0.002), ry, -cornerZ * off);
-      parts.push(prepGeom(rvz, 1.15, 1.02, 0.80, 1.0, false));
+      parts.push(prepGeom(rvz, 1.15, 1.02, 0.80, 3.0, false));
     }
   }
 
@@ -250,116 +301,111 @@ function buildCompleteHokoraMeshes() {
   const whiteAndLeafParts: THREE.BufferGeometry[] = [];
 
   // ==========================================================================
-  // 0. SLEEK SUBMERGED WET BASALT FOOTING (Keeps the Hokora grounded right on the sea!)
+  // 0. SLEEK SUBMERGED WET BASALT FOOTING (Grounded directly on the sea!)
   // ==========================================================================
   const seaFooting = createTaperedBox(1.42, 1.24, 1.16, 1.02, 0.16);
   seaFooting.translate(0, -0.15, 0);
-  graniteParts.push(prepGeom(seaFooting, 0.36, 0.40, 0.46, 1.0));
+  graniteParts.push(prepGeom(seaFooting, 0.42, 0.46, 0.50, 1.0, true, 'metric-stone'));
 
   // ==========================================================================
-  // 1. BLUEPRINT 3-COURSE CUT GRANITE BASE (y: 0.00 -> 0.37, W=1.08, D=0.94)
+  // 1. BLUEPRINT 3-COURSE CUT GRANITE BASE (Metric 1:1 square ashlar stone blocks!)
   // ==========================================================================
   const gFootLip = new THREE.BoxGeometry(1.11, 0.024, 0.97);
   gFootLip.translate(0, 0.012, 0);
-  graniteParts.push(prepGeom(gFootLip, 0.72, 0.75, 0.78, 1.0));
+  graniteParts.push(prepGeom(gFootLip, 0.72, 0.75, 0.78, 1.0, true, 'metric-stone'));
 
   const gCourse1 = new THREE.BoxGeometry(1.08, 0.086, 0.94);
   gCourse1.translate(0, 0.065, 0);
-  graniteParts.push(prepGeom(gCourse1, 0.88, 0.90, 0.93, 1.0));
+  graniteParts.push(prepGeom(gCourse1, 0.90, 0.92, 0.94, 1.0, true, 'metric-stone'));
 
-  // Course 2: Battered/sloped inward granite ashlar blocks (y: 0.108 -> 0.262)
   const gCourse2 = createTaperedBox(1.03, 0.90, 0.92, 0.80, 0.154);
   gCourse2.translate(0, 0.108, 0);
-  graniteParts.push(prepGeom(gCourse2, 0.95, 0.97, 0.99, 1.0));
+  graniteParts.push(prepGeom(gCourse2, 0.96, 0.98, 1.00, 1.0, true, 'metric-stone'));
 
-  // Course 3: Heavy overhanging granite coping slab (y: 0.262 -> 0.370)
   const gUnderBevel = createTaperedBox(0.93, 0.81, 1.05, 0.92, 0.016);
   gUnderBevel.translate(0, 0.262, 0);
-  graniteParts.push(prepGeom(gUnderBevel, 0.62, 0.64, 0.68, 1.0));
+  graniteParts.push(prepGeom(gUnderBevel, 0.58, 0.60, 0.64, 1.0, true, 'metric-stone'));
 
   const gCourse3 = new THREE.BoxGeometry(1.05, 0.082, 0.92);
   gCourse3.translate(0, 0.311, 0);
-  graniteParts.push(prepGeom(gCourse3, 1.02, 1.03, 1.05, 1.0));
+  graniteParts.push(prepGeom(gCourse3, 1.02, 1.03, 1.05, 1.0, true, 'metric-stone'));
 
   const gTopBevel = createTaperedBox(1.05, 0.92, 1.00, 0.87, 0.018);
   gTopBevel.translate(0, 0.352, 0);
-  graniteParts.push(prepGeom(gTopBevel, 1.08, 1.09, 1.10, 1.0));
+  graniteParts.push(prepGeom(gTopBevel, 1.06, 1.07, 1.08, 1.0, true, 'metric-stone'));
 
   // ==========================================================================
-  // 2. FRONT WOODEN SAISEN-BAKO (COIN OFFERING BOX — "Stone Base Detail" Close-Up!)
+  // 2. FRONT WOODEN SAISEN-BAKO (COIN OFFERING BOX)
   // ==========================================================================
   const sbZ = 0.502;
   const sbY = 0.282;
   const sbBody = new THREE.BoxGeometry(0.265, 0.106, 0.095);
   sbBody.translate(0, sbY, sbZ);
-  darkWoodParts.push(prepGeom(sbBody, 1.72, 1.38, 1.08, 1.4));
+  darkWoodParts.push(prepGeom(sbBody, 1.55, 1.25, 0.98, 1.6));
 
   const sbSlotRecess = new THREE.BoxGeometry(0.095, 0.025, 0.018);
   sbSlotRecess.translate(0, sbY + 0.010, sbZ + 0.043);
-  darkWoodParts.push(prepGeom(sbSlotRecess, 0.18, 0.14, 0.12, 1.0, false));
+  darkWoodParts.push(prepGeom(sbSlotRecess, 0.14, 0.11, 0.09, 1.6, false));
 
   for (const sx of [-0.124, 0.124]) {
     const batten = new THREE.BoxGeometry(0.020, 0.108, 0.102);
     batten.translate(sx, sbY, sbZ);
-    darkWoodParts.push(prepGeom(batten, 1.38, 1.12, 0.90, 1.4));
+    darkWoodParts.push(prepGeom(batten, 1.28, 1.04, 0.84, 1.6));
   }
 
   for (const slopeSide of [-1, 1]) {
     const miniSlope = new THREE.BoxGeometry(0.310, 0.014, 0.070);
     miniSlope.rotateX(slopeSide * 0.32);
     miniSlope.translate(0, sbY + 0.064, sbZ + slopeSide * 0.028);
-    darkWoodParts.push(prepGeom(miniSlope, 1.56, 1.24, 0.98, 1.4));
+    darkWoodParts.push(prepGeom(miniSlope, 1.48, 1.18, 0.94, 1.6));
   }
   const sbRidge = new THREE.BoxGeometry(0.314, 0.016, 0.022);
   sbRidge.translate(0, sbY + 0.076, sbZ);
-  darkWoodParts.push(prepGeom(sbRidge, 1.32, 1.06, 0.84, 1.4));
+  darkWoodParts.push(prepGeom(sbRidge, 1.24, 1.00, 0.80, 1.6));
 
   // ==========================================================================
-  // 3. COMPACT DARK TIMBER WAIST PLINTH & GOLDEN KANAGU ORNAMENTS (y: 0.37 -> 0.64)
+  // 3. COMPACT DARK TIMBER WAIST PLINTH & GOLDEN KANAGU ORNAMENTS
   // ==========================================================================
   const dodaiCore = new THREE.BoxGeometry(0.86, 0.052, 0.75);
   dodaiCore.translate(0, 0.396, 0);
-  darkWoodParts.push(prepGeom(dodaiCore, 0.95, 0.95, 0.98, 1.0));
+  darkWoodParts.push(prepGeom(dodaiCore, 0.94, 0.94, 0.96, 1.1));
 
   for (const cx of [-0.375, 0.375]) {
     for (const cz of [-0.325, 0.325]) {
       const footBlk = new THREE.BoxGeometry(0.145, 0.056, 0.145);
       footBlk.translate(cx, 0.398, cz);
-      darkWoodParts.push(prepGeom(footBlk, 1.12, 1.10, 1.12, 1.0));
+      darkWoodParts.push(prepGeom(footBlk, 1.10, 1.08, 1.10, 1.1));
     }
   }
 
   const frontStep1 = new THREE.BoxGeometry(0.40, 0.038, 0.09);
   frontStep1.translate(0, 0.389, 0.415);
-  darkWoodParts.push(prepGeom(frontStep1, 1.06, 1.06, 1.08, 1.0));
+  darkWoodParts.push(prepGeom(frontStep1, 1.04, 1.04, 1.06, 1.1));
 
   const frontStep2 = new THREE.BoxGeometry(0.36, 0.038, 0.07);
   frontStep2.translate(0, 0.427, 0.385);
-  darkWoodParts.push(prepGeom(frontStep2, 1.12, 1.12, 1.14, 1.0));
+  darkWoodParts.push(prepGeom(frontStep2, 1.10, 1.10, 1.12, 1.1));
 
-  // Recessed dark plank waist panel (shaded darker inside recess for strong 3D depth!)
   const waistCore = new THREE.BoxGeometry(0.68, 0.172, 0.58);
   waistCore.translate(0, 0.508, 0);
-  darkWoodParts.push(prepGeom(waistCore, 0.72, 0.72, 0.76, 1.0));
+  darkWoodParts.push(prepGeom(waistCore, 0.68, 0.68, 0.72, 1.1));
 
   const waistMidRail = new THREE.BoxGeometry(0.72, 0.022, 0.62);
   waistMidRail.translate(0, 0.506, 0);
-  darkWoodParts.push(prepGeom(waistMidRail, 1.04, 1.02, 1.05, 1.0));
+  darkWoodParts.push(prepGeom(waistMidRail, 1.04, 1.02, 1.05, 1.1));
 
   for (const cx of [-0.348, 0.348]) {
     for (const cz of [-0.298, 0.298]) {
       const stile = new THREE.BoxGeometry(0.076, 0.174, 0.076);
       stile.translate(cx, 0.508, cz);
-      darkWoodParts.push(prepGeom(stile, 1.14, 1.12, 1.14, 1.0));
+      darkWoodParts.push(prepGeom(stile, 1.14, 1.12, 1.14, 1.1));
     }
   }
 
-  // Overhanging upper sanctuary floor deck (y: 0.594 -> 0.642, W=0.80, D=0.70)
   const upperDeck = new THREE.BoxGeometry(0.80, 0.048, 0.70);
   upperDeck.translate(0, 0.618, 0);
-  darkWoodParts.push(prepGeom(upperDeck, 1.18, 1.16, 1.18, 1.0));
+  darkWoodParts.push(prepGeom(upperDeck, 1.16, 1.14, 1.16, 1.1));
 
-  // 4 Scalloped Golden Corner Brackets (Sumi-Kanagu with 3D spherical rivets!)
   for (const sx of [-1, 1] as const) {
     for (const sz of [-1, 1] as const) {
       const kanagu = createScallopedCornerKanagu(sx, sz);
@@ -369,7 +415,7 @@ function buildCompleteHokoraMeshes() {
   }
 
   // ==========================================================================
-  // 4. COMPACT VERMILION SANCTUARY BODY, BALUSTRADES & OFFERINGS (y: 0.642 -> 1.20)
+  // 4. COMPACT VERMILION SANCTUARY BODY, BALUSTRADES & OFFERINGS
   // ==========================================================================
   const pillarPositions: [number, number, number][] = [
     [-0.335, 0.275, 0.535],
@@ -383,96 +429,92 @@ function buildCompleteHokoraMeshes() {
   for (const [px, pz, ph] of pillarPositions) {
     const shoe = new THREE.BoxGeometry(0.084, 0.024, 0.084);
     shoe.translate(px, 0.654, pz);
-    darkWoodParts.push(prepGeom(shoe, 0.75, 0.75, 0.80, 1.0));
+    darkWoodParts.push(prepGeom(shoe, 0.75, 0.75, 0.80, 1.2));
 
     const col = new THREE.BoxGeometry(0.070, ph, 0.070);
     col.translate(px, 0.642 + ph * 0.5, pz);
-    redWoodParts.push(prepGeom(col, 1.04, 1.0, 1.0, 1.0));
+    redWoodParts.push(prepGeom(col, 1.04, 1.0, 1.0, 1.1));
   }
 
-  // Enclosed Vermilion Sanctuary Chamber (Moya)
   const moyaWalls = new THREE.BoxGeometry(0.64, 0.565, 0.275);
   moyaWalls.translate(0, 0.924, -0.125);
-  redWoodParts.push(prepGeom(moyaWalls, 0.82, 0.80, 0.80, 1.0));
+  redWoodParts.push(prepGeom(moyaWalls, 0.80, 0.78, 0.78, 1.1));
 
-  // Inner Sanctuary Double Cedar Doors (Tobira) + Golden Brass Fittings
   for (const side of [-1, 1]) {
     const doorPanel = new THREE.BoxGeometry(0.195, 0.39, 0.022);
     doorPanel.translate(side * 0.102, 0.86, 0.016);
-    darkWoodParts.push(prepGeom(doorPanel, 1.68, 1.32, 0.98, 1.2));
+    darkWoodParts.push(prepGeom(doorPanel, 1.62, 1.28, 0.96, 1.4));
 
     for (const hy of [0.74, 0.96]) {
       const strap = new THREE.BoxGeometry(0.078, 0.015, 0.008);
       strap.translate(side * 0.152, hy, 0.029);
-      goldParts.push(prepGeom(strap, 1.05, 0.94, 0.72, 1.0, false));
+      goldParts.push(prepGeom(strap, 1.05, 0.94, 0.72, 3.0, false));
     }
   }
   const doorClasp = new THREE.CylinderGeometry(0.018, 0.018, 0.010, 10);
   doorClasp.rotateX(Math.PI / 2);
   doorClasp.translate(0, 0.85, 0.029);
-  goldParts.push(prepGeom(doorClasp, 1.12, 0.98, 0.76, 1.0, false));
+  goldParts.push(prepGeom(doorClasp, 1.12, 0.98, 0.76, 3.0, false));
 
-  // Side Vermilion Balustrades (Kōran) + Golden Giboshi Caps
   for (const side of [-1, 1]) {
     const rx = side * 0.335;
     const lowRail = new THREE.BoxGeometry(0.028, 0.020, 0.26);
     lowRail.translate(rx, 0.702, 0.145);
-    redWoodParts.push(prepGeom(lowRail, 1.0, 0.98, 0.98, 1.0));
+    redWoodParts.push(prepGeom(lowRail, 1.0, 0.98, 0.98, 1.2));
 
     const topRail = new THREE.BoxGeometry(0.032, 0.024, 0.29);
     topRail.translate(rx, 0.764, 0.155);
-    redWoodParts.push(prepGeom(topRail, 1.06, 1.02, 1.02, 1.0));
+    redWoodParts.push(prepGeom(topRail, 1.06, 1.02, 1.02, 1.2));
 
     const midPost = new THREE.BoxGeometry(0.026, 0.122, 0.026);
     midPost.translate(rx, 0.703, 0.145);
-    redWoodParts.push(prepGeom(midPost, 0.96, 0.94, 0.94, 1.0));
+    redWoodParts.push(prepGeom(midPost, 0.96, 0.94, 0.94, 1.2));
 
     const giboshi = new THREE.SphereGeometry(0.020, 8, 8);
     giboshi.scale(1.0, 1.35, 1.0);
     giboshi.translate(rx, 0.794, 0.215);
-    goldParts.push(prepGeom(giboshi, 1.10, 0.98, 0.76, 1.0, false));
+    goldParts.push(prepGeom(giboshi, 1.10, 0.98, 0.76, 3.0, false));
   }
 
-  // Upper Vermilion Tie-Beams & Stepped Masugumi Bracket Blocks
   const frontBeam = new THREE.BoxGeometry(0.77, 0.052, 0.058);
   frontBeam.translate(0, 1.152, 0.275);
-  redWoodParts.push(prepGeom(frontBeam, 1.02, 1.0, 1.0, 1.0));
+  redWoodParts.push(prepGeom(frontBeam, 1.02, 1.0, 1.0, 1.1));
 
   const rearBeam = new THREE.BoxGeometry(0.77, 0.054, 0.058);
   rearBeam.translate(0, 1.192, -0.265);
-  redWoodParts.push(prepGeom(rearBeam, 0.94, 0.92, 0.92, 1.0));
+  redWoodParts.push(prepGeom(rearBeam, 0.94, 0.92, 0.92, 1.1));
 
   for (const side of [-1, 1]) {
     const sideTie = new THREE.BoxGeometry(0.056, 0.052, 0.65);
     sideTie.translate(side * 0.335, 1.172, 0.005);
-    redWoodParts.push(prepGeom(sideTie, 1.0, 0.98, 0.98, 1.0));
+    redWoodParts.push(prepGeom(sideTie, 1.0, 0.98, 0.98, 1.1));
 
     for (const bz of [0.275, -0.265]) {
       const daito = new THREE.BoxGeometry(0.098, 0.032, 0.098);
       daito.translate(side * 0.335, bz > 0 ? 1.186 : 1.228, bz);
-      redWoodParts.push(prepGeom(daito, 0.90, 0.88, 0.88, 1.0));
+      redWoodParts.push(prepGeom(daito, 0.90, 0.88, 0.88, 1.2));
 
       const hijiki = new THREE.BoxGeometry(0.148, 0.028, 0.090);
       hijiki.translate(side * 0.335, bz > 0 ? 1.212 : 1.254, bz);
-      redWoodParts.push(prepGeom(hijiki, 1.02, 1.0, 1.0, 1.0));
+      redWoodParts.push(prepGeom(hijiki, 1.02, 1.0, 1.0, 1.2));
     }
 
     const kingPost = new THREE.BoxGeometry(0.052, 0.25, 0.052);
     kingPost.translate(side * 0.335, 1.33, -0.08);
-    redWoodParts.push(prepGeom(kingPost, 0.92, 0.90, 0.90, 1.0));
+    redWoodParts.push(prepGeom(kingPost, 0.92, 0.90, 0.90, 1.1));
   }
 
   // ==========================================================================
-  // 5. SACRED PORCH ALTAR OFFERINGS (Gohei, Suzu Bell Cord, Sakaki Vases & Sanbō)
+  // 5. SACRED PORCH ALTAR OFFERINGS
   // ==========================================================================
   for (const ox of [-0.10, 0.015]) {
     const trayStand = new THREE.BoxGeometry(0.068, 0.048, 0.068);
     trayStand.translate(ox, 0.666, 0.195);
-    darkWoodParts.push(prepGeom(trayStand, 1.85, 1.48, 1.08, 1.4));
+    darkWoodParts.push(prepGeom(trayStand, 1.75, 1.40, 1.04, 1.8));
 
     const trayTop = new THREE.BoxGeometry(0.094, 0.014, 0.094);
     trayTop.translate(ox, 0.696, 0.195);
-    darkWoodParts.push(prepGeom(trayTop, 1.98, 1.58, 1.15, 1.4));
+    darkWoodParts.push(prepGeom(trayTop, 1.88, 1.50, 1.10, 1.8));
 
     const vessel = new THREE.CylinderGeometry(0.018, 0.024, 0.038, 10);
     vessel.translate(ox, 0.722, 0.195);
@@ -481,7 +523,7 @@ function buildCompleteHokoraMeshes() {
 
   const goheiRod = new THREE.CylinderGeometry(0.008, 0.010, 0.24, 8);
   goheiRod.translate(-0.02, 0.78, 0.10);
-  darkWoodParts.push(prepGeom(goheiRod, 1.95, 1.58, 1.15, 1.4));
+  darkWoodParts.push(prepGeom(goheiRod, 1.85, 1.48, 1.08, 1.8));
 
   for (const gSide of [-1, 1]) {
     const goheiStream = createZigzagShideGeometry(0.62);
@@ -497,7 +539,7 @@ function buildCompleteHokoraMeshes() {
 
   const suzuBell = new THREE.SphereGeometry(0.024, 10, 8);
   suzuBell.translate(0.082, 0.94, 0.15);
-  goldParts.push(prepGeom(suzuBell, 1.12, 0.98, 0.70, 1.0, false));
+  goldParts.push(prepGeom(suzuBell, 1.12, 0.98, 0.70, 3.0, false));
 
   for (const vx of [-0.225, 0.225]) {
     const vz = 0.205;
@@ -574,11 +616,10 @@ function buildCompleteHokoraMeshes() {
     cg.setAttribute('position', new THREE.Float32BufferAttribute(cPos, 3));
     cg.setAttribute('uv', new THREE.Float32BufferAttribute(cUv, 2));
     cg.setIndex(cIdx);
-    curtainParts.push(prepGeom(cg, 1.0, 1.0, 1.0, 1.0, true));
+    curtainParts.push(prepGeom(cg, 1.0, 1.0, 1.0, 1.0, true, 'preserve'));
   }
   const indigoCurtainGeom = mergeGeometries(curtainParts, false)!;
 
-  // 3D Helical Double-Strand Twisted Shimenawa Rope
   const ropeSegs = 40;
   for (let strand = 0; strand < 2; strand++) {
     const curvePts: THREE.Vector3[] = [];
@@ -608,7 +649,7 @@ function buildCompleteHokoraMeshes() {
       tPos.setY(k, cy + (tPos.getY(k) - cy) * env);
       tPos.setZ(k, 0.302 + (tPos.getZ(k) - 0.302) * env);
     }
-    strawParts.push(prepGeom(tube, 1.04, 0.98, 0.88, 1.0, false));
+    strawParts.push(prepGeom(tube, 1.04, 0.98, 0.88, 1.0, false, 'preserve'));
   }
 
   for (const sx of [-0.278, 0.0, 0.278]) {
@@ -619,7 +660,7 @@ function buildCompleteHokoraMeshes() {
   }
 
   // ==========================================================================
-  // 7. ASYMMETRIC NAGARE-ZUKURI PATINATED COPPER ROOF (W=1.30m, D=1.03m)
+  // 7. ASYMMETRIC NAGARE-ZUKURI PATINATED COPPER ROOF (Fine 2x1.8 tiled shingles!)
   // ==========================================================================
   const nxRoof = 32;
   const nzRoof = 28;
@@ -640,10 +681,11 @@ function buildCompleteHokoraMeshes() {
       const y = evalNagareRoofY(x, z);
 
       topPos.push(x, y, z);
-      topUv.push(ux, vz);
+      // Scale roof UV so ~12 staggered copper plates span X and ~16 courses span Z!
+      topUv.push(ux * 2.0, (1.0 - vz) * 1.6);
 
       underPos.push(x, y - roofThickness, z);
-      underUv.push(ux, vz);
+      underUv.push(ux * 2.0, vz * 2.0);
     }
   }
 
@@ -663,22 +705,24 @@ function buildCompleteHokoraMeshes() {
   topRoofGeom.setAttribute('position', new THREE.Float32BufferAttribute(topPos, 3));
   topRoofGeom.setAttribute('uv', new THREE.Float32BufferAttribute(topUv, 2));
   topRoofGeom.setIndex(topIdx);
-  copperParts.push(prepGeom(topRoofGeom, 1.04, 1.06, 1.04, 1.0, false));
+  copperParts.push(prepGeom(topRoofGeom, 1.02, 1.04, 1.02, 1.0, false, 'preserve'));
 
   const underRoofGeom = new THREE.BufferGeometry();
   underRoofGeom.setAttribute('position', new THREE.Float32BufferAttribute(underPos, 3));
   underRoofGeom.setAttribute('uv', new THREE.Float32BufferAttribute(underUv, 2));
   underRoofGeom.setIndex(underIdx);
-  redWoodParts.push(prepGeom(underRoofGeom, 0.58, 0.54, 0.54, 1.0, false));
+  redWoodParts.push(prepGeom(underRoofGeom, 0.56, 0.52, 0.52, 1.0, false, 'preserve'));
 
-  // Front & Rear Patinated Copper Eave Fascia Strips
   for (const ez of [0.54, -0.49]) {
     const fPos: number[] = [];
+    const fUv: number[] = [];
     const fIdx: number[] = [];
     for (let ix = 0; ix <= nxRoof; ix++) {
-      const x = THREE.MathUtils.lerp(-0.65, 0.65, ix / nxRoof);
+      const ux = ix / nxRoof;
+      const x = THREE.MathUtils.lerp(-0.65, 0.65, ux);
       const yTop = evalNagareRoofY(x, ez);
       fPos.push(x, yTop, ez, x, yTop - 0.044, ez);
+      fUv.push(ux * 2.0, 0.12, ux * 2.0, 0.02);
     }
     for (let ix = 0; ix < nxRoof; ix++) {
       const a = ix * 2;
@@ -690,11 +734,11 @@ function buildCompleteHokoraMeshes() {
     }
     const fGeom = new THREE.BufferGeometry();
     fGeom.setAttribute('position', new THREE.Float32BufferAttribute(fPos, 3));
+    fGeom.setAttribute('uv', new THREE.Float32BufferAttribute(fUv, 2));
     fGeom.setIndex(fIdx);
-    copperParts.push(prepGeom(fGeom, 0.80, 0.88, 0.85, 1.0, false));
+    copperParts.push(prepGeom(fGeom, 0.80, 0.88, 0.85, 1.0, false, 'preserve'));
   }
 
-  // 5 Raised Standing-Seam Copper Roof Ribs (Bōgawara)
   for (const rx of [-0.47, -0.235, 0.0, 0.235, 0.47]) {
     const ribPts: THREE.Vector3[] = [];
     for (let k = 0; k <= 18; k++) {
@@ -703,10 +747,9 @@ function buildCompleteHokoraMeshes() {
     }
     const ribCurve = new THREE.CatmullRomCurve3(ribPts);
     const ribTube = new THREE.TubeGeometry(ribCurve, 22, 0.011, 6, false);
-    copperParts.push(prepGeom(ribTube, 0.72, 0.84, 0.80, 1.0, false));
+    copperParts.push(prepGeom(ribTube, 0.72, 0.84, 0.80, 1.0, false, 'preserve'));
   }
 
-  // 9 Projecting Red Eave Rafters (Taruki) + Crisp White Square End-Caps (木口 Koguchi)
   const numRafters = 9;
   for (let r = 0; r < numRafters; r++) {
     const rx = THREE.MathUtils.lerp(-0.49, 0.49, r / (numRafters - 1));
@@ -721,7 +764,7 @@ function buildCompleteHokoraMeshes() {
     const rafterF = new THREE.BoxGeometry(0.026, 0.026, lenF);
     rafterF.rotateX(pitchF);
     rafterF.translate(rx, (yStartF + yEndF) * 0.5, (0.27 + 0.51) * 0.5);
-    redWoodParts.push(prepGeom(rafterF, 0.88, 0.84, 0.84, 1.0, false));
+    redWoodParts.push(prepGeom(rafterF, 0.90, 0.86, 0.86, 1.2, false));
 
     const whiteCapF = new THREE.BoxGeometry(0.027, 0.027, 0.008);
     whiteCapF.rotateX(pitchF);
@@ -729,7 +772,6 @@ function buildCompleteHokoraMeshes() {
     whiteAndLeafParts.push(prepGeom(whiteCapF, 0.96, 0.96, 0.98, 1.0, false));
   }
 
-  // Left & Right Curved Dark-Wood Gable Bargeboards (Hafaita), Gegyo & 16-Petal Golden Kikumon
   for (const side of [-1, 1] as const) {
     const gx = side * 0.626;
     for (let k = 0; k < 18; k++) {
@@ -742,7 +784,7 @@ function buildCompleteHokoraMeshes() {
       const segBox = new THREE.BoxGeometry(0.030, 0.076, segLen);
       segBox.rotateX(ang);
       segBox.translate(gx, (y0 + y1) * 0.5, (z0 + z1) * 0.5);
-      darkWoodParts.push(prepGeom(segBox, 1.08, 1.05, 1.02, 1.0, false));
+      darkWoodParts.push(prepGeom(segBox, 1.08, 1.05, 1.02, 1.2, false));
     }
 
     const sideKiku = createChrysanthemumCrest(0.034);
@@ -752,15 +794,14 @@ function buildCompleteHokoraMeshes() {
 
     const gegyo = new THREE.BoxGeometry(0.020, 0.125, 0.085);
     gegyo.translate(gx - side * 0.016, 1.44, -0.08);
-    redWoodParts.push(prepGeom(gegyo, 1.04, 1.0, 1.0, 1.0, false));
+    redWoodParts.push(prepGeom(gegyo, 1.04, 1.0, 1.0, 1.2, false));
 
     const gegyoGold = new THREE.SphereGeometry(0.022, 8, 6);
     gegyoGold.scale(0.35, 0.85, 1.1);
     gegyoGold.translate(gx - side * 0.006, 1.46, -0.08);
-    goldParts.push(prepGeom(gegyoGold, 1.10, 0.98, 0.74, 1.0, false));
+    goldParts.push(prepGeom(gegyoGold, 1.10, 0.98, 0.74, 3.0, false));
   }
 
-  // Heavy Tiered Main Ridge Beam (Ōmune) + Upturned End Collars + Golden Bosses
   const ridgeBase = new THREE.BoxGeometry(1.28, 0.040, 0.088);
   ridgeBase.translate(0, 1.555, -0.08);
   copperParts.push(prepGeom(ridgeBase, 0.50, 0.58, 0.58, 1.0, false));
@@ -782,7 +823,7 @@ function buildCompleteHokoraMeshes() {
 
     const endGoldBoss = new THREE.SphereGeometry(0.016, 8, 8);
     endGoldBoss.translate(side * 0.595, 1.596, -0.018);
-    goldParts.push(prepGeom(endGoldBoss, 1.15, 1.0, 0.76, 1.0, false));
+    goldParts.push(prepGeom(endGoldBoss, 1.15, 1.0, 0.76, 3.0, false));
   }
 
   return {
@@ -797,22 +838,18 @@ function buildCompleteHokoraMeshes() {
   };
 }
 
-// Cinematic 3-Point Nocturnal Chiaroscuro Shrine Shader Hook (Deep Shadows + Warm Inner Altar Glow + Raking Moonlight!)
+// Physically Grounded PBR Material Hook (100% Opaque for Real 3D Shadow Maps + Wet Waterline Gloss + Ocean Caustics!)
 function enhanceHokoraPBRMaterial(
   mat: THREE.MeshStandardMaterial,
   sharedUniforms: {
     uTime: { value: number };
     uHokoraVis: { value: number };
-    uSanctuaryOrigin: { value: THREE.Vector3 };
-  },
-  innerCandleWeight = 1.0,
-  moonKeyWeight = 1.0
+  }
 ) {
-  mat.transparent = true;
+  mat.transparent = false;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uHokoraTime = sharedUniforms.uTime;
     shader.uniforms.uHokoraVis = sharedUniforms.uHokoraVis;
-    shader.uniforms.uSanctuaryOrigin = sharedUniforms.uSanctuaryOrigin;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -820,6 +857,7 @@ function enhanceHokoraPBRMaterial(
         /* glsl */ `
         #include <common>
         varying vec3 vHokoraWorldPos;
+        varying vec3 vHokoraWorldNormal;
         `
       )
       .replace(
@@ -828,6 +866,7 @@ function enhanceHokoraPBRMaterial(
         #include <worldpos_vertex>
         vec4 hokoraWp = modelMatrix * vec4(transformed, 1.0);
         vHokoraWorldPos = hokoraWp.xyz;
+        vHokoraWorldNormal = normalize(mat3(modelMatrix) * objectNormal);
         `
       );
 
@@ -838,62 +877,56 @@ function enhanceHokoraPBRMaterial(
         #include <common>
         uniform float uHokoraTime;
         uniform float uHokoraVis;
-        uniform vec3 uSanctuaryOrigin;
         varying vec3 vHokoraWorldPos;
+        varying vec3 vHokoraWorldNormal;
         `
       )
       .replace(
-        '#include <opaque_fragment>',
+        '#include <color_fragment>',
         /* glsl */ `
-        if (uHokoraVis <= 0.004) discard;
+        // Smooth stochastic screen-space dither fade during portal flight while keeping 100% Opaque Shadow-Map PBR!
+        if (uHokoraVis <= 0.005) discard;
+        if (uHokoraVis < 0.992) {
+          float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+          if (uHokoraVis < dither) discard;
+        }
+        #include <color_fragment>
 
-        // World-space normal INCLUDING tangent-space 1024px normalMap micro-relief!
-        vec3 wN = normalize(inverseTransformDirection(normal, viewMatrix));
+        // Live sea-spray dampness & dark coastal algae stain right near the lapping waterline
+        float waveLap = 0.035 * sin(vHokoraWorldPos.x * 2.2 + uHokoraTime * 1.3);
+        float wetH = vHokoraWorldPos.y - waveLap;
+        float wetStain = 1.0 - smoothstep(-0.04, 0.28, wetH);
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.30, 0.34, 0.32), wetStain * 0.85);
+        `
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        /* glsl */ `
+        #include <roughnessmap_fragment>
+        // Specular wet stone sheen where waves lap against the lower granite courses!
+        float wetGloss = 1.0 - smoothstep(-0.02, 0.32, vHokoraWorldPos.y);
+        roughnessFactor = mix(roughnessFactor, 0.11, wetGloss * 0.86);
+        `
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        /* glsl */ `
+        #include <emissivemap_fragment>
+        vec3 wN = normalize(vHokoraWorldNormal);
         vec3 viewV = normalize(cameraPosition - vHokoraWorldPos);
 
-        // Deepen shadow base so unlit faces stay moody & sculpted (NEVER washed-out flat!)
-        outgoingLight *= 0.36;
+        // 1. Subtle animated ocean & golden lantern caustics bouncing upward onto stone coping & eaves!
+        float downFace = max(0.0, -wN.y * 0.72 + 0.28);
+        float causticAtten = exp(-max(0.0, vHokoraWorldPos.y) * 0.75);
+        float cw1 = sin(vHokoraWorldPos.x * 4.6 + vHokoraWorldPos.z * 3.8 + uHokoraTime * 2.1);
+        float cw2 = cos(vHokoraWorldPos.x * 3.5 - vHokoraWorldPos.z * 4.9 - uHokoraTime * 1.7);
+        float caustic = pow(max(0.0, cw1 * cw2), 2.2);
+        vec3 causticCol = vec3(0.24, 0.22, 0.18);
+        totalEmissiveRadiance += diffuseColor.rgb * causticCol * caustic * downFace * causticAtten * 1.45;
 
-        // 1. Warm Flickering Sanctuary Altar Candlelight radiating from inside the Hokora Chamber!
-        float candleFlicker = 0.91 + 0.09 * sin(uHokoraTime * 5.2) * cos(uHokoraTime * 3.1 + 1.3);
-        vec3 altarLightPos = uSanctuaryOrigin + vec3(0.0, 1.32, 0.24);
-        vec3 toAltar = altarLightPos - vHokoraWorldPos;
-        float distA = length(toAltar);
-        vec3 dirA = toAltar / max(0.001, distA);
-        float diffA = pow(max(0.0, dot(wN, dirA)), 1.15) * 0.85 + 0.15;
-        float attenA = 1.0 / (1.0 + distA * distA * 1.45);
-        outgoingLight += diffuseColor.rgb * vec3(3.10, 1.65, 0.55) * diffA * attenA * candleFlicker * ${innerCandleWeight.toFixed(2)};
-
-        // Subtle warm amber lantern bounce kissing the front Saisen-bako coin box & stone steps!
-        vec3 saisenBouncePos = uSanctuaryOrigin + vec3(0.0, 0.56, 1.12);
-        vec3 toSb = saisenBouncePos - vHokoraWorldPos;
-        float dSb = length(toSb);
-        float diffSb = max(0.0, dot(wN, toSb / max(0.001, dSb)));
-        float attenSb = 1.0 / (1.0 + dSb * dSb * 2.2);
-        outgoingLight += diffuseColor.rgb * vec3(1.65, 0.96, 0.38) * diffSb * attenSb * candleFlicker * 0.95;
-
-        // 2. Strong Angled Silvery-Blue Oborozuki Key Moonlight from Upper-Left-Front (Chiaroscuro Contrast!)
-        vec3 moonKeyDir = normalize(vec3(-0.78, 0.52, 0.35));
-        float moonDiff = pow(max(0.0, dot(wN, moonKeyDir)), 1.25);
-        vec3 halfMoon = normalize(moonKeyDir + viewV);
-        float specExp = mix(20.0, 88.0, 1.0 - roughnessFactor);
-        float moonSpec = pow(max(0.0, dot(wN, halfMoon)), specExp);
-
-        outgoingLight += diffuseColor.rgb * vec3(0.82, 0.98, 1.32) * moonDiff * ${moonKeyWeight.toFixed(2)};
-        outgoingLight += mix(vec3(0.24, 0.36, 0.56), diffuseColor.rgb * 1.85, metalnessFactor)
-                       * moonSpec * (0.35 + 0.75 * metalnessFactor) * ${moonKeyWeight.toFixed(2)};
-
-        // 3. Cool Emerald-Indigo Back-Right Rim Kicker sculpting the silhouette edge against the night sea!
-        vec3 rimDir = normalize(vec3(0.80, 0.36, -0.48));
-        float backRim = pow(max(0.0, dot(wN, rimDir)), 2.0) * pow(1.0 - abs(dot(wN, viewV)), 1.8);
-        outgoingLight += vec3(0.14, 0.28, 0.48) * backRim * ${moonKeyWeight.toFixed(2)};
-
-        // 4. Wet Sea-Spray Gloss & Darkening right at the waterline
-        float waterlineWet = 1.0 - smoothstep(-0.02, 0.28, vHokoraWorldPos.y);
-        outgoingLight *= mix(1.0, 0.52, waterlineWet);
-
-        diffuseColor.a *= uHokoraVis;
-        #include <opaque_fragment>
+        // 2. Delicate nocturnal silver-indigo grazing Fresnel rim on curved eaves & corners
+        float fresnel = pow(1.0 - abs(dot(wN, viewV)), 3.6);
+        totalEmissiveRadiance += vec3(0.055, 0.095, 0.175) * fresnel;
         `
       );
   };
@@ -905,15 +938,24 @@ export function HokoraShrine({
   scale = 1.54,
   visibilityRef,
 }: HokoraShrineProps) {
-  const rootRef = useRef<THREE.Group>(null);
+  const wrapperRef = useRef<THREE.Group>(null);
+  const meshGroupRef = useRef<THREE.Group>(null);
+  const moonKeyRef = useRef<THREE.DirectionalLight>(null);
+  const moonTargetObj = useMemo(() => {
+    const o = new THREE.Object3D();
+    o.position.set(0, 1.15, 0);
+    return o;
+  }, []);
+  const altarCandleRef = useRef<THREE.PointLight>(null);
+  const frontLanternBounceRef = useRef<THREE.PointLight>(null);
+  const shadowBakedRef = useRef(false);
 
   const sharedUniforms = useMemo(
     () => ({
       uTime: { value: 0 },
       uHokoraVis: { value: 0 },
-      uSanctuaryOrigin: { value: new THREE.Vector3(position[0], position[1], position[2]) },
     }),
-    [position]
+    []
   );
 
   const meshes = useMemo(() => buildCompleteHokoraMeshes(), []);
@@ -925,112 +967,108 @@ export function HokoraShrine({
       new THREE.MeshStandardMaterial({
         map: tex.granite.map,
         normalMap: tex.granite.normalMap,
-        normalScale: new THREE.Vector2(1.45, 1.45),
+        normalScale: new THREE.Vector2(1.35, 1.35),
         roughnessMap: tex.granite.roughnessMap,
-        roughness: 0.82,
-        metalness: 0.06,
+        roughness: 0.84,
+        metalness: 0.05,
+        envMapIntensity: 1.25,
         vertexColors: true,
       }),
-      sharedUniforms,
-      0.75,
-      1.20
+      sharedUniforms
     );
 
     const darkWoodMat = enhanceHokoraPBRMaterial(
       new THREE.MeshStandardMaterial({
         map: tex.darkWood.map,
         normalMap: tex.darkWood.normalMap,
-        normalScale: new THREE.Vector2(1.35, 1.35),
+        normalScale: new THREE.Vector2(1.25, 1.25),
         roughnessMap: tex.darkWood.roughnessMap,
-        roughness: 0.72,
+        roughness: 0.68,
         metalness: 0.06,
+        envMapIntensity: 1.35,
         vertexColors: true,
       }),
-      sharedUniforms,
-      1.15,
-      1.15
+      sharedUniforms
     );
 
     const redWoodMat = enhanceHokoraPBRMaterial(
       new THREE.MeshStandardMaterial({
         map: tex.redWood.map,
         normalMap: tex.redWood.normalMap,
-        normalScale: new THREE.Vector2(1.10, 1.10),
+        normalScale: new THREE.Vector2(1.05, 1.05),
         roughnessMap: tex.redWood.roughnessMap,
-        roughness: 0.48,
+        roughness: 0.42,
         metalness: 0.08,
+        envMapIntensity: 1.55,
         vertexColors: true,
       }),
-      sharedUniforms,
-      1.42,
-      1.05
+      sharedUniforms
     );
 
     const copperRoofMat = enhanceHokoraPBRMaterial(
       new THREE.MeshStandardMaterial({
         map: tex.copperTile.map,
         normalMap: tex.copperTile.normalMap,
-        normalScale: new THREE.Vector2(1.55, 1.55),
+        normalScale: new THREE.Vector2(1.45, 1.45),
         roughnessMap: tex.copperTile.roughnessMap,
-        roughness: 0.46,
-        metalness: 0.48,
+        roughness: 0.48,
+        metalness: 0.56,
+        envMapIntensity: 2.10,
         vertexColors: true,
       }),
-      sharedUniforms,
-      0.35,
-      1.38
+      sharedUniforms
     );
 
     const goldMetalMat = enhanceHokoraPBRMaterial(
       new THREE.MeshStandardMaterial({
-        color: '#ebb948',
-        roughness: 0.22,
-        metalness: 0.94,
+        map: tex.goldMetal.map,
+        normalMap: tex.goldMetal.normalMap,
+        normalScale: new THREE.Vector2(0.85, 0.85),
+        roughnessMap: tex.goldMetal.roughnessMap,
+        color: '#f2c45a',
+        roughness: 0.24,
+        metalness: 0.92,
+        envMapIntensity: 2.60,
         vertexColors: true,
       }),
-      sharedUniforms,
-      1.45,
-      1.55
+      sharedUniforms
     );
 
     const strawRopeMat = enhanceHokoraPBRMaterial(
       new THREE.MeshStandardMaterial({
         map: tex.strawRope.map,
         normalMap: tex.strawRope.normalMap,
-        normalScale: new THREE.Vector2(1.30, 1.30),
+        normalScale: new THREE.Vector2(1.25, 1.25),
         roughnessMap: tex.strawRope.roughnessMap,
-        roughness: 0.80,
+        roughness: 0.82,
         metalness: 0.02,
+        envMapIntensity: 1.15,
         vertexColors: true,
       }),
-      sharedUniforms,
-      1.30,
-      1.05
+      sharedUniforms
     );
 
     const indigoCurtainMat = enhanceHokoraPBRMaterial(
       new THREE.MeshStandardMaterial({
         map: tex.indigoCurtainMap,
         normalMap: tex.indigoCurtainNormal,
-        normalScale: new THREE.Vector2(1.0, 1.0),
-        roughness: 0.84,
+        normalScale: new THREE.Vector2(1.10, 1.10),
+        roughness: 0.86,
         metalness: 0.02,
+        envMapIntensity: 1.10,
         vertexColors: true,
       }),
-      sharedUniforms,
-      1.30,
-      1.15
+      sharedUniforms
     );
 
     const whiteAndLeafMat = enhanceHokoraPBRMaterial(
       new THREE.MeshStandardMaterial({
-        roughness: 0.30,
+        roughness: 0.28,
         metalness: 0.04,
+        envMapIntensity: 1.40,
         vertexColors: true,
       }),
-      sharedUniforms,
-      1.55,
-      1.02
+      sharedUniforms
     );
 
     return {
@@ -1046,35 +1084,159 @@ export function HokoraShrine({
   }, [sharedUniforms]);
 
   useEffect(() => {
-    if (rootRef.current) {
-      rootRef.current.traverse((obj) => obj.layers.enable(1));
+    if (meshGroupRef.current) {
+      meshGroupRef.current.traverse((obj) => obj.layers.enable(1));
+    }
+    if (moonKeyRef.current) {
+      moonKeyRef.current.shadow.autoUpdate = false;
+      moonKeyRef.current.shadow.needsUpdate = true;
     }
   }, []);
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime();
+    const vis = visibilityRef.current;
+
     sharedUniforms.uTime.value = t;
-    sharedUniforms.uHokoraVis.value = visibilityRef.current;
+    sharedUniforms.uHokoraVis.value = vis;
+
+    const show = vis > 0.005;
+    if (wrapperRef.current) {
+      wrapperRef.current.visible = show;
+    }
+    if (!show) {
+      if (moonKeyRef.current) moonKeyRef.current.intensity = 0;
+      if (altarCandleRef.current) altarCandleRef.current.intensity = 0;
+      if (frontLanternBounceRef.current) frontLanternBounceRef.current.intensity = 0;
+      return;
+    }
+
+    // Trigger static 1024x1024 shadow-map bake once the Hokora enters full view (0.00ms per-frame cost thereafter!)
+    if (!shadowBakedRef.current && vis > 0.992 && moonKeyRef.current) {
+      moonKeyRef.current.shadow.needsUpdate = true;
+      shadowBakedRef.current = true;
+    } else if (vis < 0.5) {
+      shadowBakedRef.current = false;
+    }
+
+    const flicker = 0.92 + 0.08 * Math.sin(t * 5.4) * Math.cos(t * 3.1 + 1.2);
+
+    if (moonKeyRef.current) {
+      moonKeyRef.current.intensity = 3.4 * vis;
+    }
+    if (altarCandleRef.current) {
+      altarCandleRef.current.intensity = 8.5 * flicker * vis;
+    }
+    if (frontLanternBounceRef.current) {
+      frontLanternBounceRef.current.intensity = 3.2 * flicker * vis;
+    }
   });
 
   return (
-    <group ref={rootRef} position={position} scale={scale} name="HokoraShrine">
-      <mesh geometry={meshes.graniteGeom} material={materials.graniteMat} raycast={() => null} />
-      <mesh geometry={meshes.darkWoodGeom} material={materials.darkWoodMat} raycast={() => null} />
-      <mesh geometry={meshes.redWoodGeom} material={materials.redWoodMat} raycast={() => null} />
-      <mesh geometry={meshes.copperGeom} material={materials.copperRoofMat} raycast={() => null} />
-      <mesh geometry={meshes.goldGeom} material={materials.goldMetalMat} raycast={() => null} />
-      <mesh geometry={meshes.strawGeom} material={materials.strawRopeMat} raycast={() => null} />
-      <mesh
-        geometry={meshes.indigoCurtainGeom}
-        material={materials.indigoCurtainMat}
-        raycast={() => null}
+    <group position={position} name="HokoraSanctuaryLightingAndMesh">
+      <primitive object={moonTargetObj} />
+
+      {/* 1. Dedicated Static-Baked 1024x1024 Oborozuki Moonlight Key Light (4.3mm Razor-Sharp Real 3D Shadows!) */}
+      <directionalLight
+        ref={moonKeyRef}
+        position={[-5.2, 4.35, 5.4]}
+        target={moonTargetObj}
+        color="#c6dcff"
+        intensity={0}
+        castShadow
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
+        shadow-camera-near={1.5}
+        shadow-camera-far={15.0}
+        shadow-camera-left={-2.1}
+        shadow-camera-right={2.1}
+        shadow-camera-top={2.85}
+        shadow-camera-bottom={-0.35}
+        shadow-bias={-0.0005}
+        shadow-normalBias={0.015}
       />
-      <mesh
-        geometry={meshes.whiteAndLeafGeom}
-        material={materials.whiteAndLeafMat}
-        raycast={() => null}
+
+      {/* 2. Real Physical GGX Sanctuary Altar Candle PointLight inside the Hokora Chamber */}
+      <pointLight
+        ref={altarCandleRef}
+        position={[0, 1.36, 0.14]}
+        color="#ff9638"
+        distance={3.9}
+        decay={2.0}
+        intensity={0}
       />
+
+      {/* 3. Subtle Warm Floating-Lantern Sea Bounce onto Saisen-bako Coin Box & Lower Granite Courses */}
+      <pointLight
+        ref={frontLanternBounceRef}
+        position={[0, 0.45, 1.38]}
+        color="#ffb45c"
+        distance={4.2}
+        decay={2.0}
+        intensity={0}
+      />
+
+      {/* 8 Batched Opaque PBR Architectural Meshes Casting & Receiving Real 3D Shadows */}
+      <group ref={wrapperRef} visible={false} name="HokoraMeshVisibilityGate">
+      <group ref={meshGroupRef} scale={scale} name="HokoraShrine">
+        <mesh
+          geometry={meshes.graniteGeom}
+          material={materials.graniteMat}
+          castShadow
+          receiveShadow
+          raycast={() => null}
+        />
+        <mesh
+          geometry={meshes.darkWoodGeom}
+          material={materials.darkWoodMat}
+          castShadow
+          receiveShadow
+          raycast={() => null}
+        />
+        <mesh
+          geometry={meshes.redWoodGeom}
+          material={materials.redWoodMat}
+          castShadow
+          receiveShadow
+          raycast={() => null}
+        />
+        <mesh
+          geometry={meshes.copperGeom}
+          material={materials.copperRoofMat}
+          castShadow
+          receiveShadow
+          raycast={() => null}
+        />
+        <mesh
+          geometry={meshes.goldGeom}
+          material={materials.goldMetalMat}
+          castShadow
+          receiveShadow
+          raycast={() => null}
+        />
+        <mesh
+          geometry={meshes.strawGeom}
+          material={materials.strawRopeMat}
+          castShadow
+          receiveShadow
+          raycast={() => null}
+        />
+        <mesh
+          geometry={meshes.indigoCurtainGeom}
+          material={materials.indigoCurtainMat}
+          castShadow
+          receiveShadow
+          raycast={() => null}
+        />
+        <mesh
+          geometry={meshes.whiteAndLeafGeom}
+          material={materials.whiteAndLeafMat}
+          castShadow
+          receiveShadow
+          raycast={() => null}
+        />
+      </group>
+      </group>
     </group>
   );
 }

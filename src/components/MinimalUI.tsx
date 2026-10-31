@@ -332,14 +332,14 @@ export function MinimalUI({ ready }: { ready: boolean }) {
                 <span className="oracle-eyebrow">末 社 奉 納 · HOKORA SHRINE OFFERING</span>
                 <h2 className="oracle-heading">Offer a Wish at the Hokora</h2>
                 <p className="oracle-desc">
-                  Panjatkan permohonan Anda. Lentera emas akan menghanyutkannya ke laut abadi dan kuil akan membalasnya dengan ramalan Omikuji.
+                  Offer your wish. A golden lantern will carry it into the eternal sea, and the shrine will answer with an Omikuji prophecy.
                 </p>
                 <input
                   type="text"
                   maxLength={140}
                   value={wishText}
                   onChange={(e) => setWishText(e.target.value)}
-                  placeholder="Tuliskan permohonan atau biarkan kosong untuk doa hening..."
+                  placeholder="Write your wish or leave blank for a silent prayer..."
                   className="oracle-input"
                   autoFocus
                 />

@@ -243,35 +243,35 @@ export function SkyAtmosphere() {
 
     const atmMix = THREE.MathUtils.smoothstep(p, 0.06, 0.96);
 
-    // Modulate PBR IBL intensity so shadows have deep sculptural contrast in dark mode!
+    // Modulate PBR IBL intensity so shadows have deep sculptural contrast + metallic sheen in dark mode!
     if ('environmentIntensity' in scene) {
       (scene as THREE.Scene & { environmentIntensity: number }).environmentIntensity =
-        THREE.MathUtils.lerp(0.68, 0.19, atmMix);
+        THREE.MathUtils.lerp(0.68, 0.28, atmMix);
     }
 
     if (scene.fog && scene.fog instanceof THREE.FogExp2) {
       workFogCol.copy(calmFogCol).lerp(darkFogCol, atmMix);
       scene.fog.color.copy(workFogCol);
       // Thicker nocturnal sea-mist envelops distant silhouettes for eerie depth
-      scene.fog.density = THREE.MathUtils.lerp(0.0078, 0.0130, atmMix);
+      scene.fog.density = THREE.MathUtils.lerp(0.0078, 0.0118, atmMix);
     }
 
     // CHIAROSCURO LIGHTING: Asymmetric strong angled Key Light + deep moody shadow contrast + mystical Moonlit Rim!
     if (hemiRef.current) {
       hemiRef.current.color.copy(calmSkyLight).lerp(darkSkyLight, atmMix);
       hemiRef.current.groundColor.copy(calmGroundLight).lerp(darkGroundLight, atmMix);
-      hemiRef.current.intensity = THREE.MathUtils.lerp(0.85, 0.22, atmMix);
+      hemiRef.current.intensity = THREE.MathUtils.lerp(0.85, 0.16, atmMix);
     }
 
     if (keySunRef.current) {
       keySunRef.current.color.copy(workSunCol);
-      keySunRef.current.intensity = THREE.MathUtils.lerp(3.4, 0.34, atmMix);
+      keySunRef.current.intensity = THREE.MathUtils.lerp(3.4, 0.10, atmMix);
     }
 
     if (rimLightRef.current) {
       // Ghostly silver-indigo edge kicker sculpts pillar silhouettes & copper roof in the night!
       rimLightRef.current.color.copy(calmRimCol).lerp(auroraRimCol, atmMix);
-      rimLightRef.current.intensity = THREE.MathUtils.lerp(1.85, 1.65, atmMix);
+      rimLightRef.current.intensity = THREE.MathUtils.lerp(1.85, 1.15, atmMix);
     }
 
     // Unified Dynamic Sanctuary PointLight (Replaces 4 separate PointLights -> huge PBR shader speedup!)

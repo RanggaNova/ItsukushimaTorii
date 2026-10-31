@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { experienceState } from '../state/experienceState';
-import { getSharedNoiseTexture } from '../utils/proceduralTextures';
+import { getSharedNoiseTexture, getMountainDetailTextures } from '../utils/proceduralTextures';
 
 // ============================================================================
 // 1. MULTI-LAYER JAPANESE ISLAND MOUNTAIN RANGES (MOUNT MISEN / MIYAJIMA STYLE)
@@ -29,6 +29,8 @@ void main() {
 
 const mountainFragmentShader = /* glsl */ `
 uniform sampler2D uNoiseTex;
+uniform sampler2D uRockTex;
+uniform sampler2D uCanopyTex;
 uniform float uPortalProgress;
 uniform float uTime;
 uniform vec4 uSeasonWeights; // x: haru, y: natsu, z: aki, w: fuyu
@@ -39,106 +41,137 @@ varying float vRidge;
 varying vec3 vWorldPos;
 varying vec3 vNormalW;
 
+// Seamless triplanar sample of a baked detail map:
+// rg = slope (tangent-space), b = albedo variation / species id, a = cavity AO
+void triSample(sampler2D tex, vec3 p, vec3 w, float scale, out vec3 pert, out float alb, out float ao) {
+  vec4 sx = texture2D(tex, p.zy * scale);
+  vec4 sy = texture2D(tex, p.xz * scale);
+  vec4 sz = texture2D(tex, p.xy * scale);
+  vec2 ax = sx.rg * 2.0 - 1.0;
+  vec2 ay = sy.rg * 2.0 - 1.0;
+  vec2 az = sz.rg * 2.0 - 1.0;
+  pert = w.x * vec3(0.0, ax.y, ax.x) + w.y * vec3(ay.x, 0.0, ay.y) + w.z * vec3(az.x, az.y, 0.0);
+  alb = dot(vec3(sx.b, sy.b, sz.b), w);
+  ao = dot(vec3(sx.a, sy.a, sz.a), w);
+}
+
+// Per-tree-crown seasonal species palette (linear albedo)
+vec3 treeCrownColor(float id, vec4 sw) {
+  float v1 = fract(id * 7.31);
+  float v2 = fract(id * 13.17);
+  vec3 evergreen = mix(vec3(0.009, 0.028, 0.020), vec3(0.018, 0.046, 0.028), v1);
+
+  // Haru: fresh spring greens + blossoming sakura crowns
+  vec3 haruGreen = mix(vec3(0.020, 0.052, 0.030), vec3(0.034, 0.076, 0.040), v1);
+  vec3 sakura = vec3(0.30, 0.17, 0.22) * (0.80 + 0.40 * v2);
+  vec3 haru = mix(mix(evergreen, haruGreen, step(0.30, id)), sakura, step(0.80, id));
+
+  // Natsu: deep lush summer greens
+  vec3 natsu = mix(vec3(0.014, 0.046, 0.024), vec3(0.028, 0.080, 0.032), v1);
+
+  // Aki: crimson / vermilion / gold maple crowns among dark evergreens
+  vec3 maple = mix(vec3(0.20, 0.024, 0.012), vec3(0.30, 0.088, 0.016), v1);
+  maple = mix(maple, vec3(0.30, 0.20, 0.032), smoothstep(0.55, 0.95, v2));
+  vec3 aki = mix(evergreen, maple, step(0.36, id));
+
+  // Fuyu: cold dark conifers + bare brown deciduous crowns
+  vec3 fuyu = mix(vec3(0.010, 0.026, 0.028), vec3(0.052, 0.040, 0.034), step(0.52, id));
+
+  return haru * sw.x + natsu * sw.y + aki * sw.z + fuyu * sw.w;
+}
+
 void main() {
   float atmMix = smoothstep(0.06, 0.96, uPortalProgress);
   vec3 geomN = normalize(vNormalW);
+  // Heightfield terrain: the true surface normal always points upward
+  geomN *= (geomN.y < 0.0) ? -1.0 : 1.0;
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
 
-  // 1. Multi-Scale Procedural Rock Strata, Vertical Cliff Fissures & Cedar Forest Canopy
-  vec2 uvMacro  = vec2(vWorldPos.x * 0.014 + vWorldPos.z * 0.011, vHeight * 0.045);
-  vec2 uvStrata = vec2(vWorldPos.x * 0.038 - vWorldPos.z * 0.032, vHeight * 0.195);
-  vec2 uvCrag   = vec2(vWorldPos.x * 0.115 + vWorldPos.z * 0.095, vHeight * 0.140);
-  vec2 uvCanopy = vWorldPos.xz * 0.085;
+  vec3 tw = pow(abs(geomN), vec3(4.0));
+  tw /= (tw.x + tw.y + tw.z + 0.0001);
 
-  vec4 nMacro  = texture2D(uNoiseTex, uvMacro);
-  vec4 nStrata = texture2D(uNoiseTex, uvStrata);
-  vec4 nCrag   = texture2D(uNoiseTex, uvCrag);
-  vec4 nCanopy = texture2D(uNoiseTex, uvCanopy);
+  // 1. Macro variation + two scales of fractured granite + individual tree crowns
+  vec4 nMacro = texture2D(uNoiseTex, vec2(vWorldPos.x * 0.011 + vWorldPos.z * 0.007, vHeight * 0.040));
 
-  // Slope factor: steep cliffs expose striated granite rock; gentler slopes hold dense pine/cedar forest!
+  vec3 pRock1; float aRock1; float oRock1;
+  vec3 pRock2; float aRock2; float oRock2;
+  vec3 pTree;  float treeId; float oTree;
+  triSample(uRockTex,   vWorldPos, tw, 0.045, pRock1, aRock1, oRock1);
+  triSample(uRockTex,   vWorldPos, tw, 0.175, pRock2, aRock2, oRock2);
+  triSample(uCanopyTex, vWorldPos, tw, 0.140, pTree,  treeId, oTree);
+
   float steepness = 1.0 - clamp(geomN.y, 0.0, 1.0);
-  float rockMask = smoothstep(0.28, 0.62, steepness + vRidge * 0.24 + (nMacro.r - 0.5) * 0.22);
+  float rockMask = smoothstep(0.26, 0.60, steepness + vRidge * 0.22 + (nMacro.r - 0.5) * 0.24 + smoothstep(9.0, 19.0, vHeight) * 0.20);
 
-  // High-frequency normal perturbation: horizontal cliff strata + vertical erosion gullies + forest bumps
-  vec3 rockPerturb = vec3(
-    (nCrag.r - 0.5) * 0.85 + (nStrata.r - 0.5) * 0.55,
-    (nStrata.b - 0.5) * 0.52,
-    (nCrag.g - 0.5) * 0.85 + (nStrata.g - 0.5) * 0.55
-  );
-  vec3 forestPerturb = vec3(
-    (nCanopy.r - 0.5) * 0.55,
-    (nCanopy.b - 0.5) * 0.35,
-    (nCanopy.g - 0.5) * 0.55
-  );
-  vec3 N = normalize(geomN + mix(forestPerturb, rockPerturb, rockMask));
+  vec3 rockPert = pRock1 * 1.15 + pRock2 * 0.55;
+  vec3 N = normalize(geomN + mix(pTree * 0.95, rockPert, rockMask));
 
-  // Sedimentary rock bands & fissure crevices (ambient occlusion inside gullies!)
-  float strataBands = smoothstep(0.22, 0.82, sin(vHeight * 2.35 + nMacro.g * 5.0) * 0.5 + 0.5);
-  float fissureAO = (0.48 + 0.52 * smoothstep(0.08, 0.85, vRidge)) * (0.72 + 0.28 * nCrag.b);
-  float rockAlbedoTex = mix(0.62, 1.18, strataBands * 0.55 + nStrata.b * 0.45);
-  float canopyTex = 0.68 + 0.45 * nCanopy.g;
+  float rockAO   = clamp(oRock1 * (0.55 + 0.45 * oRock2), 0.0, 1.0);
+  float canopyAO = clamp(oTree, 0.0, 1.0);
+  float cavity   = mix(canopyAO, rockAO, rockMask);
+  float ravine   = 0.50 + 0.50 * smoothstep(0.06, 0.80, vRidge);
 
-  // 2. Utsushiyo (Seasonal Daylight): Forested Sumi-e Slopes + Craggy Exposed Cliff Faces
-  vec3 forestTint =
-      vec3(0.085, 0.135, 0.145) * uSeasonWeights.x
-    + vec3(0.062, 0.148, 0.132) * uSeasonWeights.y
-    + vec3(0.155, 0.098, 0.072) * uSeasonWeights.z
-    + vec3(0.088, 0.122, 0.152) * uSeasonWeights.w;
-  vec3 cliffTint = vec3(0.165, 0.188, 0.225) * rockAlbedoTex;
+  // 2. Albedo: weathered granite blocks vs per-tree seasonal crowns
+  vec3 rockCool = vec3(0.112, 0.118, 0.130);
+  vec3 rockWarm = vec3(0.158, 0.138, 0.114);
+  vec3 rockAlbedo = mix(rockCool, rockWarm, smoothstep(0.35, 0.80, aRock1 + (aRock2 - 0.5) * 0.4)) * (0.55 + 0.95 * mix(aRock1, aRock2, 0.35));
+  // Dark lichen / moss streaks hugging the cracks
+  rockAlbedo = mix(rockAlbedo, rockAlbedo * vec3(0.55, 0.72, 0.50), (1.0 - rockAO) * 0.55);
 
-  vec3 calmSurface = mix(forestTint * canopyTex, cliffTint, rockMask) * fissureAO;
-  // Aerial perspective across the 3 island mountain rings in daylight
-  vec3 calmHazeTint = vec3(0.34, 0.40, 0.47);
-  vec3 calmBase = mix(calmSurface, calmHazeTint, vLayer * 0.28);
+  vec3 crown = treeCrownColor(treeId, uSeasonWeights) * (0.62 + 0.70 * canopyAO);
+  // Sunlit upper-crown brightening so every individual tree reads as a 3D dome
+  crown *= 0.82 + 0.34 * clamp(pTree.y * 0.5 + 0.5 + N.y * 0.35, 0.0, 1.2);
 
-  // Crisp snow accumulation on ridges & ledges in Winter (Fuyu)
-  float winterSnow = smoothstep(3.8, 12.0, vHeight + nMacro.b * 2.5)
-                   * smoothstep(0.28, 0.72, N.y + vRidge * 0.25)
+  vec3 albedo = mix(crown, rockAlbedo, rockMask);
+
+  // Winter snow caps on ledges, crowns and ridges
+  float winterSnow = smoothstep(3.6, 11.5, vHeight + nMacro.b * 2.6)
+                   * smoothstep(0.30, 0.74, N.y + vRidge * 0.22)
                    * uSeasonWeights.w * (1.0 - atmMix);
-  calmBase = mix(calmBase, vec3(0.82, 0.88, 0.95), winterSnow * 0.82);
+  albedo = mix(albedo, vec3(0.72, 0.78, 0.86), winterSnow * 0.88);
 
-  // 3. Kakuriyo (Dark Mode): Deep Obsidian-Indigo Shadowed Valleys vs Moonlit Slate-Granite Crags!
-  vec3 darkForest = vec3(0.0032, 0.0068, 0.0145) * canopyTex;
-  vec3 darkCliff  = vec3(0.0085, 0.0155, 0.0310) * rockAlbedoTex;
-  vec3 darkBase   = mix(darkForest, darkCliff, rockMask) * fissureAO;
+  // 3. PHYSICAL LIGHTING
+  // Daylight: soft veiled sun + sky-dome ambient
+  vec3 sunDir = normalize(vec3(-0.70, 0.44, 0.40));
+  vec3 sunTint =
+      vec3(1.00, 0.86, 0.84) * uSeasonWeights.x
+    + vec3(1.00, 0.95, 0.82) * uSeasonWeights.y
+    + vec3(1.05, 0.74, 0.50) * uSeasonWeights.z
+    + vec3(0.88, 0.93, 1.00) * uSeasonWeights.w;
+  float sunWrap = clamp((dot(N, sunDir) + 0.38) / 1.38, 0.0, 1.0);
+  float sunSelfShadow = mix(0.40, 1.0, smoothstep(0.05, 0.62, vRidge + dot(geomN, sunDir) * 0.45));
+  vec3 daySkyAmb = vec3(0.34, 0.37, 0.44) * (0.55 + 0.45 * N.y);
+  vec3 dayLight = daySkyAmb * cavity + sunTint * 1.28 * pow(sunWrap, 1.15) * sunSelfShadow * mix(0.55, 1.0, cavity);
+  vec3 dayCol = albedo * dayLight;
 
-  vec3 col = mix(calmBase, darkBase, atmMix);
+  // Night: Oborozuki key moonlight from upper-left-front + dim indigo sky fill + warm shrine bounce
+  vec3 moonDir = normalize(vec3(-0.60, 0.48, 0.42));
+  float moonDiff = clamp((dot(N, moonDir) + 0.15) / 1.15, 0.0, 1.0);
+  float moonSelfShadow = mix(0.30, 1.0, smoothstep(0.08, 0.66, vRidge + dot(geomN, moonDir) * 0.50));
+  vec3 nightAmb = vec3(0.012, 0.024, 0.052) * (0.45 + 0.55 * N.y);
+  vec3 moonCol = vec3(0.34, 0.48, 0.82) * 0.55;
+  vec3 nightLight = nightAmb * cavity + moonCol * pow(moonDiff, 1.30) * moonSelfShadow * mix(0.40, 1.0, cavity);
+  vec3 nightCol = albedo * nightLight;
 
-  // 4. DRAMATIC LOW-ANGLE RAKING CHIAROSCURO LIGHTING (Sharp sunlit/moonlit spurs vs deep shadowed gorges!)
-  vec3 sunDir = normalize(vec3(-0.82, 0.36, 0.22));
-  float sunGrazing = pow(clamp(dot(N, sunDir), 0.0, 1.0), 1.25);
-  col += vec3(0.135, 0.132, 0.128) * sunGrazing * fissureAO * (1.0 - atmMix) * (1.0 - vLayer * 0.24);
-
-  // Low-angle raking Oborozuki Moonlight from left-horizon carves stark 3D ridge-vs-ravine contrast!
-  vec3 moonDir = normalize(vec3(-0.88, 0.27, 0.18));
-  float rawMoonDot = clamp(dot(N, moonDir), 0.0, 1.0);
-  // Mask direct moonlight slightly inside deep ravines (vRidge) to simulate mountain self-shadowing!
-  float selfShadow = smoothstep(0.12, 0.68, vRidge + rawMoonDot * 0.35);
-  float moonRaking = pow(rawMoonDot, 1.35) * selfShadow;
-
-  // Specular mineral glint on steep moonlit rock cliffs
+  // Wet-rock moonlit specular glints
   vec3 halfMoon = normalize(moonDir + viewDir);
-  float rockSpec = pow(clamp(dot(N, halfMoon), 0.0, 1.0), 22.0) * rockMask * selfShadow;
+  float rockSpec = pow(clamp(dot(N, halfMoon), 0.0, 1.0), 26.0) * rockMask * moonSelfShadow;
+  nightCol += vec3(0.060, 0.100, 0.200) * rockSpec;
 
-  vec3 moonLitCliff = vec3(0.088, 0.148, 0.275) * moonRaking * (0.45 + 0.85 * rockMask * rockAlbedoTex)
-                    + vec3(0.075, 0.125, 0.235) * rockSpec;
-
-  // Razor crest rim-backlight along high jagged mountain spines against the night sky
+  // Razor crest rim-backlight along jagged ridges against the night sky
   float skyCrestRim = smoothstep(0.45, 0.98, vRidge)
                     * smoothstep(3.0, 15.0, vHeight)
                     * pow(1.0 - abs(dot(geomN, viewDir)), 1.8);
-  moonLitCliff += vec3(0.032, 0.064, 0.135) * skyCrestRim;
+  nightCol += vec3(0.030, 0.060, 0.130) * skyCrestRim;
 
-  // Subtle sky-dome ambient fill ONLY on upward-facing ridges so shadowed ravines stay ink-dark!
-  moonLitCliff += vec3(0.005, 0.011, 0.025) * clamp(N.y, 0.0, 1.0) * fissureAO;
-
-  col += moonLitCliff * atmMix * (1.0 - vLayer * 0.18);
-
-  // Faint warm golden bounce on central near-shore cliffs from the Hokora & Lantern Sea
+  // Faint warm golden bounce on central near-shore slopes from the Hokora & lantern sea
   float shrineBounce = exp(-abs(vWorldPos.x) * 0.055) * (1.0 - step(0.5, vLayer));
-  col += vec3(0.028, 0.016, 0.006) * shrineBounce * (1.0 - smoothstep(0.0, 5.5, vHeight)) * atmMix;
+  nightCol += albedo * vec3(0.36, 0.20, 0.07) * shrineBounce * (1.0 - smoothstep(0.0, 5.5, vHeight));
 
-  // 5. Localized Drifting Shoreline & Ravine Mist (Keeps upper craggy peaks crisp & high-contrast!)
+  vec3 col = mix(dayCol, nightCol, atmMix);
+  col *= mix(1.0, ravine, 0.55);
+
+  // 4. Localized drifting shoreline & ravine mist + aerial perspective across the 3 island rings
   vec3 calmMist =
       vec3(0.640, 0.590, 0.655) * uSeasonWeights.x
     + vec3(0.540, 0.650, 0.715) * uSeasonWeights.y
@@ -146,15 +179,14 @@ void main() {
     + vec3(0.585, 0.645, 0.705) * uSeasonWeights.w;
 
   float driftFog = texture2D(uNoiseTex, vec2(vWorldPos.x * 0.011 + uTime * 0.0028, vLayer * 0.37 + vWorldPos.z * 0.006)).r;
-  // Subtle dark nocturnal mist nestled strictly along the water's edge and deep gorges
   vec3 darkValleyMist = mix(vec3(0.006, 0.013, 0.028), vec3(0.014, 0.026, 0.054), vLayer * 0.45) * (0.70 + 0.55 * driftFog);
   vec3 mistCol = mix(calmMist, darkValleyMist, atmMix);
 
   float gullyMistBoost = (1.0 - vRidge) * 1.4;
-  float mistCeiling = mix(3.8 + vLayer * 2.2, 2.1 + vLayer * 1.3 + gullyMistBoost, atmMix);
+  float mistCeiling = mix(3.4 + vLayer * 2.2, 2.1 + vLayer * 1.3 + gullyMistBoost, atmMix);
   float baseMistFactor = (1.0 - smoothstep(0.0, mistCeiling, vHeight)) * (0.78 + 0.22 * driftFog);
-  float distHaze = mix(0.18 + vLayer * 0.18, 0.04 + vLayer * 0.09, atmMix);
-  col = mix(col, mistCol, clamp(max(baseMistFactor * mix(0.88, 0.76, atmMix), distHaze), 0.0, 0.90));
+  float distHaze = mix(0.14 + vLayer * 0.20, 0.04 + vLayer * 0.09, atmMix);
+  col = mix(col, mistCol, clamp(max(baseMistFactor * mix(0.86, 0.76, atmMix), distHaze), 0.0, 0.90));
 
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
@@ -750,6 +782,7 @@ export function AtmosphericScenery() {
   const moteMatRef = useRef<THREE.ShaderMaterial>(null);
 
   const noiseTex = useMemo(() => getSharedNoiseTexture(), []);
+  const mountainDetail = useMemo(() => getMountainDetailTextures(), []);
 
   const mountainGeom = useMemo(() => buildMountainRangesGeometry(), []);
   const windGeom = useMemo(() => buildCameraAlignedWindGeometry(), []);
@@ -758,11 +791,15 @@ export function AtmosphericScenery() {
 
   const mountainUniformsRef = useRef({
     uNoiseTex: { value: noiseTex },
+    uRockTex: { value: mountainDetail.rockDetailTex },
+    uCanopyTex: { value: mountainDetail.forestCanopyTex },
     uTime: { value: 0 },
     uPortalProgress: { value: 0 },
     uSeasonWeights: { value: new THREE.Vector4(1, 0, 0, 0) },
   });
   mountainUniformsRef.current.uNoiseTex.value = noiseTex;
+  mountainUniformsRef.current.uRockTex.value = mountainDetail.rockDetailTex;
+  mountainUniformsRef.current.uCanopyTex.value = mountainDetail.forestCanopyTex;
 
   const windUniformsRef = useRef({
     uTime: { value: 0 },

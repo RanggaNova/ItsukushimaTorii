@@ -562,6 +562,7 @@ export function KakuriyoSanctuary() {
   });
 
   return (
+    <>
     <group ref={groupRef} visible={false} name="KakuriyoSanctuary">
       {/* 1. Instanced HD Cedar-Grained Floating Lantern Frames (Igeta Base + Kumiko Lattice + Kasa Roof) */}
       <instancedMesh
@@ -608,13 +609,6 @@ export function KakuriyoSanctuary() {
         />
       </instancedMesh>
 
-      {/* 3. Grounded, Shortened HD Shinto Hokora (末社・小祠) Shrine in the Center of Kakuriyo */}
-      <HokoraShrine
-        position={[0, 0.03, HOKORA_SANCTUARY_Z]}
-        scale={1.54}
-        visibilityRef={hokoraVisRef}
-      />
-
       {/* Subtle Warm Sanctuary Veil & Moonlit Mist Column behind the Hokora */}
       <mesh position={[0, 1.48, HOKORA_SANCTUARY_Z - 1.15]} renderOrder={2} raycast={() => null}>
         <planeGeometry args={[4.8, 4.2]} />
@@ -643,5 +637,13 @@ export function KakuriyoSanctuary() {
         />
       </points>
     </group>
+    {/* 3. Grounded HD Shinto Hokora Shrine. Lives OUTSIDE the toggled group so its lights stay
+        permanently registered (intensity 0 when hidden) => zero shader recompile hitch on portal entry! */}
+    <HokoraShrine
+      position={[0, 0.03, HOKORA_SANCTUARY_Z]}
+      scale={1.54}
+      visibilityRef={hokoraVisRef}
+    />
+    </>
   );
 }
