@@ -29,7 +29,7 @@ export interface WishListResponse {
   source: 'sqlite' | 'local-fallback';
 }
 
-const FALLBACK_STORAGE_KEY = 'hokora_wishes_records_v2';
+const FALLBACK_STORAGE_KEY = 'hokora_wishes_real_v4';
 
 function readFallbackRecords(): WishLanternSlot[] {
   try {

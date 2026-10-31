@@ -89,6 +89,7 @@ export function MinimalUI({ ready }: { ready: boolean }) {
     isHoveringGate: false,
     season: 'haru',
     userLanternCount: 0,
+    activeLanternCount: 0,
     selectedLantern: null,
   });
 
@@ -218,7 +219,10 @@ export function MinimalUI({ ready }: { ready: boolean }) {
   let whisperLabel = 'CLICK ONCE TO ENTER THE GATE';
   if (status.isToggledDark) {
     if (status.isInsideKakuriyo) {
-      whisperLabel = 'CLICK A FLOATING LANTERN TO REVEAL A PRAYER';
+      whisperLabel =
+        status.activeLanternCount > 0
+          ? `CLICK A FLOATING LANTERN TO REVEAL A PRAYER · ${status.activeLanternCount} DRIFTING`
+          : 'MAKE A WISH TO RELEASE A FLOATING LANTERN';
     } else {
       whisperLabel = 'CROSSING THE SACRED THRESHOLD';
     }

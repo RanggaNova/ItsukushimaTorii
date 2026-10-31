@@ -44,39 +44,6 @@ export function evalOceanWaveHeight(x: number, z: number, t: number): number {
   return h * distFade;
 }
 
-export const INITIAL_PILGRIM_PRAYERS: {
-  text: string;
-  rank: string;
-  label: string;
-  season: SeasonId;
-}[] = [
-  { text: 'May the gentle tide carry peace to all weary spirits.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'haru' },
-  { text: 'Wishing for the courage to walk forward along this uncharted path.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'haru' },
-  { text: 'For the health, long life, and laughter of my elders.', rank: '中 吉', label: 'CHŪKICHI · SERENE FORTUNE', season: 'aki' },
-  { text: 'May warmth and quiet understanding heal the silence between us.', rank: '末 吉', label: 'SUEKICHI · DAWNING GRACE', season: 'fuyu' },
-  { text: 'A silent prayer for clarity when the world ahead feels veiled in fog.', rank: '玄 吉', label: 'GENKICHI · MYSTIC HARMONY', season: 'natsu' },
-  { text: 'May peace settle upon our village and across every distant shore.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'haru' },
-  { text: 'Wishing for gentle patience until the winter frost melts into spring.', rank: '末 吉', label: 'SUEKICHI · DAWNING GRACE', season: 'fuyu' },
-  { text: 'Gratitude for the unexpected kindness received from strangers.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'aki' },
-  { text: 'May my children grow with compassionate hearts and steady wings.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'haru' },
-  { text: 'Wishing to see an old friend once more beneath the summer moon.', rank: '中 吉', label: 'CHŪKICHI · SERENE FORTUNE', season: 'natsu' },
-  { text: 'For safe passage across the stormy seas and a peaceful homecoming.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'aki' },
-  { text: 'A prayer for recovery, rest, and renewal of strength.', rank: '中 吉', label: 'CHŪKICHI · SERENE FORTUNE', season: 'haru' },
-  { text: 'May honesty and quiet devotion guide every work of my hands.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'natsu' },
-  { text: 'Wishing for the wisdom to let go of grief and welcome new light.', rank: '玄 吉', label: 'GENKICHI · MYSTIC HARMONY', season: 'aki' },
-  { text: 'May art, poetry, and song continue to mend broken hearts.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'haru' },
-  { text: 'For harmony between the mountain, the restless ocean, and all living souls.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'fuyu' },
-  { text: 'Wishing that those who wander in darkness may glimpse a guiding light.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'natsu' },
-  { text: 'A sincere wish for forgiveness, release of burdens, and a light heart.', rank: '玄 吉', label: 'GENKICHI · MYSTIC HARMONY', season: 'aki' },
-  { text: 'May good fortune follow quiet beginnings and patient roots.', rank: '中 吉', label: 'CHŪKICHI · SERENE FORTUNE', season: 'haru' },
-  { text: 'Hoping that tomorrow’s dawn brings unexpected solace.', rank: '末 吉', label: 'SUEKICHI · DAWNING GRACE', season: 'fuyu' },
-  { text: 'Deep gratitude for the silent gifts of this fleeting life.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'aki' },
-  { text: 'May love outlast distance and keep the hearth fires burning.', rank: '吉', label: 'KICHI · AUSPICIOUS TIDE', season: 'fuyu' },
-  { text: 'Wishing for calm waters and clear stars on the voyage ahead.', rank: '中 吉', label: 'CHŪKICHI · SERENE FORTUNE', season: 'natsu' },
-  { text: 'May every whisper entrusted to this flame find an open ear in heaven.', rank: '大 吉', label: 'DAIKICHI · GREAT BLESSING', season: 'haru' },
-  { text: 'Peace to the departed spirits resting beneath the eternal starlight.', rank: '玄 吉', label: 'GENKICHI · MYSTIC HARMONY', season: 'fuyu' },
-];
-
 export interface UIStatusSnapshot {
   portalStage: number;
   isToggledDark: boolean;
@@ -86,6 +53,7 @@ export interface UIStatusSnapshot {
   isHoveringGate: boolean;
   season: SeasonId;
   userLanternCount: number;
+  activeLanternCount: number;
   selectedLantern: LanternInstance | null;
 }
 
@@ -163,6 +131,7 @@ class ExperienceStore {
   private lastEmittedHover = false;
   private lastEmittedSeason: SeasonId = 'haru';
   private lastEmittedLanterns = 0;
+  private lastEmittedActiveLanterns = -1;
   private lastEmittedSelectedId: number | null = null;
 
   constructor() {
@@ -172,34 +141,27 @@ class ExperienceStore {
       return rng / 4294967296;
     };
 
+    // Initialize 25 lantern slots as inactive with zero dummy data (only real user wishes appear!)
     for (let i = 0; i < MAX_LANTERNS; i++) {
-      // Arrange 25 lanterns along a sacred perspective avenue flanking the Hokora Shrine
-      const side = i % 2 === 0 ? -1 : 1;
-      const depthT = i / MAX_LANTERNS;
-      const z = -13.8 - depthT * 19.5 - rand() * 1.8;
-      const laneSpread = 3.35 + rand() * 7.4 + depthT * 2.4;
-      const x = side * laneSpread + (rand() - 0.5) * 0.9;
-      const seedPrayer = INITIAL_PILGRIM_PRAYERS[i % INITIAL_PILGRIM_PRAYERS.length];
-
       this.lanterns.push({
-        id: -(i + 1),
-        active: true,
-        x,
-        z,
-        baseX: x,
+        id: 0,
+        active: false,
+        x: 0,
+        z: -100,
+        baseX: 0,
         driftPhase: rand() * Math.PI * 2,
         driftSpeed: 0.065 + rand() * 0.065,
-        birthTime: 0,
-        staggerOrder: depthT * 0.75 + rand() * 0.25,
-        isUserSpawned: false,
+        birthTime: -100,
+        staggerOrder: (i / MAX_LANTERNS) * 0.75 + rand() * 0.25,
+        isUserSpawned: true,
         isGoldenWish: false,
-        wishText: seedPrayer.text,
-        authorName: 'Anonymous Pilgrim',
-        season: seedPrayer.season,
-        omikujiRank: seedPrayer.rank,
-        omikujiLabel: seedPrayer.label,
+        wishText: '',
+        authorName: '',
+        season: 'haru',
+        omikujiRank: '',
+        omikujiLabel: '',
         omikujiVerse: '',
-        createdAt: new Date().toISOString(),
+        createdAt: '',
       });
     }
   }
@@ -344,6 +306,12 @@ class ExperienceStore {
    * Hydrates persisted golden wish lanterns from the SQLite database onto the Kakuriyo sea.
    */
   hydrateSavedWishes(records: WishLanternSlot[], totalCount: number) {
+    // Reset all slots first so no old/stale lanterns remain active
+    for (let i = 0; i < MAX_LANTERNS; i++) {
+      this.lanterns[i].active = false;
+      this.lanterns[i].wishText = '';
+    }
+
     const slice = records.slice(0, MAX_LANTERNS);
     for (let i = 0; i < slice.length; i++) {
       const rec = slice[i];
@@ -369,7 +337,7 @@ class ExperienceStore {
 
     // Set ring buffer insertion slot so new wishes overwrite the oldest slot
     this.oldestSlot = slice.length % MAX_LANTERNS;
-    this.userLanternCount = Math.max(this.userLanternCount, totalCount);
+    this.userLanternCount = totalCount;
     this.emitSnapshot(true);
   }
 
@@ -435,6 +403,7 @@ class ExperienceStore {
       (!this.isPortalOpenTarget && (this.travelProgress > 0.02 || this.portalProgress > 0.04));
 
     const currentSelectedId = this.selectedLantern ? this.selectedLantern.id : null;
+    const activeLanterns = this.lanterns.reduce((sum, l) => sum + (l.active ? 1 : 0), 0);
 
     if (
       force ||
@@ -445,6 +414,7 @@ class ExperienceStore {
       this.isHoveringGate !== this.lastEmittedHover ||
       this.season !== this.lastEmittedSeason ||
       this.userLanternCount !== this.lastEmittedLanterns ||
+      activeLanterns !== this.lastEmittedActiveLanterns ||
       currentSelectedId !== this.lastEmittedSelectedId
     ) {
       this.lastEmittedStage = stage;
@@ -454,6 +424,7 @@ class ExperienceStore {
       this.lastEmittedHover = this.isHoveringGate;
       this.lastEmittedSeason = this.season;
       this.lastEmittedLanterns = this.userLanternCount;
+      this.lastEmittedActiveLanterns = activeLanterns;
       this.lastEmittedSelectedId = currentSelectedId;
 
       const snap: UIStatusSnapshot = {
@@ -465,6 +436,7 @@ class ExperienceStore {
         isHoveringGate: this.isHoveringGate,
         season: this.season,
         userLanternCount: this.userLanternCount,
+        activeLanternCount: activeLanterns,
         selectedLantern: this.selectedLantern,
       };
       this.listeners.forEach((fn) => fn(snap));
