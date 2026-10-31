@@ -884,7 +884,7 @@ export function AtmosphericScenery() {
           vertexShader={mountainVertexShader}
           fragmentShader={mountainFragmentShader}
           uniforms={mountainUniformsRef.current}
-          side={THREE.DoubleSide}
+          side={THREE.FrontSide}
         />
       </mesh>
 

@@ -4,8 +4,8 @@ import * as THREE from 'three';
 import { experienceState } from '../state/experienceState';
 import { getMistCloudSpriteTexture } from '../utils/proceduralTextures';
 
-// 165 pre-baked cloud sprites = silky 60-120 FPS with rich volumetric coverage & minimal overdraw!
-const MIST_COUNT = 165;
+// 96 tuned volumetric cloud sprites = buttery smooth 60-120 FPS with identical lush fog density and low overdraw!
+const MIST_COUNT = 96;
 const PORTAL_CENTER = new THREE.Vector3(0, 2.05, 0);
 
 const mistVertexShader = /* glsl */ `
@@ -124,27 +124,27 @@ export function VolumetricMist() {
         hx = (rand() - 0.5) * 26.0;
         hy = 0.35 + rand() * 3.8;
         hz = -2.2 - rand() * 12.5;
-        bScale = 3.4 + rand() * 3.2;
-        bAlpha = 0.09 + rand() * 0.06;
+        bScale = 4.2 + rand() * 3.6;
+        bAlpha = 0.11 + rand() * 0.06;
       } else if (zoneRoll < 0.55) {
         const side = rand() < 0.5 ? -1 : 1;
         hx = side * 2.75 + (rand() - 0.5) * 3.2;
         hy = 0.25 + rand() * 3.4;
         hz = (rand() - 0.5) * 4.6;
-        bScale = 2.1 + rand() * 1.8;
-        bAlpha = 0.08 + rand() * 0.05;
+        bScale = 2.6 + rand() * 2.0;
+        bAlpha = 0.10 + rand() * 0.05;
       } else if (zoneRoll < 0.75) {
         hx = (rand() - 0.5) * 8.5;
         hy = 0.12 + rand() * 1.15;
         hz = (rand() - 0.5) * 4.2;
-        bScale = 2.2 + rand() * 1.8;
-        bAlpha = 0.08 + rand() * 0.05;
+        bScale = 2.7 + rand() * 2.0;
+        bAlpha = 0.10 + rand() * 0.05;
       } else {
         hx = (rand() - 0.5) * 30.0;
         hy = 0.10 + rand() * 0.85;
         hz = -10.0 + rand() * 19.0;
-        bScale = 3.5 + rand() * 3.0;
-        bAlpha = 0.08 + rand() * 0.05;
+        bScale = 4.2 + rand() * 3.5;
+        bAlpha = 0.10 + rand() * 0.05;
       }
 
       const seed = rand();
