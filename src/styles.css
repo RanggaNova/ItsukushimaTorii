@@ -1,0 +1,372 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #cfd7de;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  font-family: 'Cormorant Garamond', 'Noto Serif JP', Georgia, serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.experience-root {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* Zero-cost Optical Cinema Vignette */
+.cinema-vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    rgba(0, 0, 0, 0) 54%,
+    rgba(8, 14, 24, 0.28) 100%
+  );
+}
+
+/* Cinematic Veil Transition on Initial Load */
+.loading-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: radial-gradient(circle at 50% 50%, #dce3e8 0%, #c6d0d8 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: opacity 1.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.loading-veil.veil-fade-out {
+  opacity: 0;
+}
+
+.loading-mark {
+  font-family: 'Noto Serif JP', serif;
+  font-weight: 200;
+  font-size: 0.85rem;
+  letter-spacing: 0.55em;
+  color: rgba(34, 44, 54, 0.55);
+}
+
+/* Minimalist UI Overlay */
+.ui-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  transition: opacity 1.6s ease, color 1.2s ease;
+}
+
+/* Deep Nocturnal Mystical Edge Vignette in Dark Mode */
+.ui-layer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at 50% 48%,
+    rgba(0, 0, 0, 0) 44%,
+    rgba(2, 5, 14, 0.56) 100%
+  );
+  opacity: 0;
+  transition: opacity 2.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ui-layer.ui-dark::before {
+  opacity: 1;
+}
+
+.ui-hidden {
+  opacity: 0;
+}
+
+.ui-visible {
+  opacity: 1;
+}
+
+.ui-light {
+  --ink: rgba(24, 32, 40, 0.68);
+  --ink-subtle: rgba(24, 32, 40, 0.40);
+  --ink-faint: rgba(24, 32, 40, 0.16);
+  --accent: rgba(45, 58, 72, 0.72);
+}
+
+.ui-dark {
+  --ink: rgba(220, 230, 248, 0.78);
+  --ink-subtle: rgba(185, 202, 235, 0.48);
+  --ink-faint: rgba(160, 185, 235, 0.18);
+  --accent: rgba(135, 168, 245, 0.88);
+}
+
+/* Top-Left Minimalist Logo */
+.ui-brand {
+  position: absolute;
+  top: 2.2rem;
+  left: 2.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  color: var(--ink);
+  transition: color 1.2s ease;
+}
+
+.ui-kanji {
+  font-family: 'Noto Serif JP', serif;
+  font-weight: 200;
+  font-size: 0.92rem;
+  letter-spacing: 0.32em;
+}
+
+.ui-divider {
+  width: 18px;
+  height: 1px;
+  background: var(--ink-subtle);
+  transition: background-color 1.2s ease;
+}
+
+.ui-sub {
+  font-size: 0.65rem;
+  font-weight: 300;
+  letter-spacing: 0.38em;
+  color: var(--ink-subtle);
+  transition: color 1.2s ease;
+}
+
+/* Top-Right Sound Toggle */
+.ui-sound-btn {
+  position: absolute;
+  top: 2.0rem;
+  right: 2.5rem;
+  width: 34px;
+  height: 34px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.72;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.ui-sound-btn:hover {
+  opacity: 1;
+}
+
+.sound-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 13px;
+}
+
+.sound-bars i {
+  display: block;
+  width: 1px;
+  background: var(--ink);
+  transition: height 0.4s ease, background-color 1.2s ease;
+  height: 3px;
+}
+
+.ui-sound-btn.is-active .sound-bars i:nth-child(1) {
+  animation: waveBar 1.3s ease-in-out infinite 0s;
+}
+.ui-sound-btn.is-active .sound-bars i:nth-child(2) {
+  animation: waveBar 1.1s ease-in-out infinite 0.2s;
+}
+.ui-sound-btn.is-active .sound-bars i:nth-child(3) {
+  animation: waveBar 1.4s ease-in-out infinite 0.4s;
+}
+.ui-sound-btn.is-active .sound-bars i:nth-child(4) {
+  animation: waveBar 1.2s ease-in-out infinite 0.15s;
+}
+
+@keyframes waveBar {
+  0%, 100% {
+    height: 3px;
+  }
+  50% {
+    height: 13px;
+  }
+}
+
+/* Dark-Mode Mystical Inscription (Positioned cleanly in the sky above the Torii roof) */
+.dark-realm-verse {
+  position: absolute;
+  top: 6.2vh;
+  left: 50%;
+  transform: translate3d(-50%, 8px, 0);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.48rem;
+  text-align: center;
+  width: max-content;
+  max-width: 88vw;
+  opacity: 0;
+  filter: blur(7px);
+  transition:
+    opacity 2.1s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 2.4s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 2.1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dark-realm-verse.is-revealed {
+  opacity: 1;
+  transform: translate3d(-50%, 0, 0);
+  filter: blur(0px);
+}
+
+.dark-realm-kanji {
+  font-family: 'Noto Serif JP', serif;
+  font-weight: 200;
+  font-size: 0.68rem;
+  letter-spacing: 0.58em;
+  padding-left: 0.58em;
+  color: rgba(176, 196, 232, 0.64);
+  text-shadow: 0 0 18px rgba(105, 140, 220, 0.35);
+}
+
+.dark-realm-title {
+  font-family: 'Cormorant Garamond', 'Noto Serif JP', Georgia, serif;
+  font-weight: 300;
+  font-style: italic;
+  font-size: clamp(1.02rem, 1.55vw, 1.34rem);
+  letter-spacing: 0.24em;
+  padding-left: 0.24em;
+  color: rgba(226, 235, 250, 0.86);
+  text-shadow:
+    0 2px 20px rgba(4, 10, 26, 0.85),
+    0 0 28px rgba(112, 148, 228, 0.28);
+}
+
+/* Bottom Poetic Text & Hairline Portal Indicator */
+.ui-bottom {
+  position: absolute;
+  bottom: 2.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  text-align: center;
+  width: max-content;
+  max-width: 90vw;
+}
+
+.portal-indicator-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.portal-filament-track {
+  width: 44px;
+  height: 1px;
+  background: var(--ink-faint);
+  overflow: hidden;
+  transition: background-color 1.2s ease;
+}
+
+.portal-filament-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: center;
+  transition: transform 0.12s linear, background-color 1.2s ease;
+}
+
+.portal-whisper {
+  font-size: 0.58rem;
+  font-weight: 300;
+  letter-spacing: 0.42em;
+  padding-left: 0.42em;
+  color: var(--ink-subtle);
+  transition: color 1.2s ease, opacity 0.8s ease;
+}
+
+.ui-poetic-stack {
+  display: grid;
+  place-items: center;
+}
+
+.ui-poetic-line {
+  grid-area: 1 / 1;
+  font-size: 0.92rem;
+  font-weight: 300;
+  font-style: italic;
+  letter-spacing: 0.30em;
+  padding-left: 0.30em;
+  color: var(--ink);
+  transition:
+    opacity 1.5s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 1.5s cubic-bezier(0.22, 1, 0.36, 1),
+    color 1.2s ease;
+}
+
+.ui-poetic-line.is-shown {
+  opacity: 1;
+  filter: blur(0px);
+}
+
+.ui-poetic-line.is-faded {
+  opacity: 0;
+  filter: blur(4px);
+}
+
+@media (max-width: 640px) {
+  .ui-brand {
+    top: 1.4rem;
+    left: 1.4rem;
+  }
+  .ui-sub {
+    display: none;
+  }
+  .ui-divider {
+    display: none;
+  }
+  .ui-sound-btn {
+    top: 1.2rem;
+    right: 1.4rem;
+  }
+  .dark-realm-verse {
+    top: 8.5vh;
+    gap: 0.38rem;
+  }
+  .dark-realm-kanji {
+    font-size: 0.58rem;
+    letter-spacing: 0.45em;
+  }
+  .dark-realm-title {
+    font-size: 0.92rem;
+    letter-spacing: 0.16em;
+  }
+  .ui-bottom {
+    bottom: 1.7rem;
+  }
+  .ui-poetic-line {
+    font-size: 0.82rem;
+    letter-spacing: 0.22em;
+  }
+}
