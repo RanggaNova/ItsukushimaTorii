@@ -1,81 +1,18 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { experienceState, SeasonId, UIStatusSnapshot } from '../state/experienceState';
+import { LangId, SCROLL_STAGES } from '../data/toriiPartsData';
 import { soundEngine } from '../audio/SoundEngine';
-import { fetchSavedWishes, saveWishToDatabase } from '../services/wishDatabase';
 
-const SEASONS: { id: SeasonId; kanji: string; label: string; poetic: string }[] = [
-  {
-    id: 'haru',
-    kanji: '春',
-    label: 'HARU',
-    poetic: 'Drifting sakura petals kiss the morning tide.',
-  },
-  {
-    id: 'natsu',
-    kanji: '夏',
-    label: 'NATSU',
-    poetic: 'Fireflies linger above the tranquil summer sea.',
-  },
-  {
-    id: 'aki',
-    kanji: '秋',
-    label: 'AKI',
-    poetic: 'Crimson maple leaves drift into golden twilight.',
-  },
-  {
-    id: 'fuyu',
-    kanji: '冬',
-    label: 'FUYU',
-    poetic: 'Silent snow rests upon the ancient copper eaves.',
-  },
-];
-
-interface OmikujiBlessing {
-  rankKanji: string;
-  rankLabel: string;
-  verse: string;
-  counsel: string;
-}
-
-const OMIKUJI_BLESSINGS: OmikujiBlessing[] = [
-  {
-    rankKanji: '大 吉',
-    rankLabel: 'DAIKICHI · GREAT BLESSING',
-    verse: 'Like the morning mist parting before warm sunlight, the path ahead clears of its own accord.',
-    counsel: 'Let go of haste; what belongs to your spirit is already flowing toward you.',
-  },
-  {
-    rankKanji: '中 吉',
-    rankLabel: 'CHŪKICHI · SERENE FORTUNE',
-    verse: 'Though tides rise and fall against the cedar pillars, the sacred gate stands unshaken.',
-    counsel: 'Quiet steadiness will carry your wish farther than restless force.',
-  },
-  {
-    rankKanji: '吉',
-    rankLabel: 'KICHI · AUSPICIOUS TIDE',
-    verse: 'A single lantern set upon dark water illuminates more than it knows.',
-    counsel: 'Trust small, sincere beginnings; gentle ripples reach distant shores.',
-  },
-  {
-    rankKanji: '末 吉',
-    rankLabel: 'SUEKICHI · DAWNING GRACE',
-    verse: 'Beneath winter frost, spring blossoms are already dreaming in silence.',
-    counsel: 'Patience in this quiet season prepares an unexpected blooming.',
-  },
-  {
-    rankKanji: '玄 吉',
-    rankLabel: 'GENKICHI · MYSTIC HARMONY',
-    verse: 'Between moonlit sky and mirroring sea, two worlds breathe as one.',
-    counsel: 'Release heavy thoughts to the current; clarity arrives in stillness.',
-  },
+const SEASONS: { id: SeasonId; kanji: string; label: string }[] = [
+  { id: 'haru', kanji: '春', label: 'HARU' },
+  { id: 'natsu', kanji: '夏', label: 'NATSU' },
+  { id: 'aki', kanji: '秋', label: 'AKI' },
+  { id: 'fuyu', kanji: '冬', label: 'FUYU' },
 ];
 
 export function MinimalUI({ ready }: { ready: boolean }) {
+  const [lang, setLang] = useState<LangId>('id');
   const [soundOn, setSoundOn] = useState(false);
-  const [wishModalOpen, setWishModalOpen] = useState(false);
-  const [wishText, setWishText] = useState('');
-  const [dissolvingWish, setDissolvingWish] = useState<string | null>(null);
-  const [activeBlessing, setActiveBlessing] = useState<OmikujiBlessing | null>(null);
 
   const warpVeilRef = useRef<HTMLDivElement>(null);
   const filamentFillRef = useRef<HTMLDivElement>(null);
@@ -88,9 +25,8 @@ export function MinimalUI({ ready }: { ready: boolean }) {
     hasInteracted: false,
     isHoveringGate: false,
     season: 'haru',
-    userLanternCount: 0,
-    activeLanternCount: 0,
-    selectedLantern: null,
+    activeStageIndex: 0,
+    activeChapter: 'hero',
   });
 
   useEffect(() => {
@@ -99,21 +35,7 @@ export function MinimalUI({ ready }: { ready: boolean }) {
     });
   }, []);
 
-  // Silently hydrate golden lantern positions from SQLite database on startup
-  useEffect(() => {
-    let mounted = true;
-    void fetchSavedWishes().then((res) => {
-      if (!mounted) return;
-      if (res.wishes.length > 0) {
-        experienceState.hydrateSavedWishes(res.wishes, res.totalCount);
-      }
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // Direct zero-re-render DOM style sync for continuous progress & warp veil
+  // Direct 60fps zero-re-render DOM sync for warp veil & scroll progress bar
   useEffect(() => {
     let rafId = 0;
     let prevWarp = -1;
@@ -126,9 +48,7 @@ export function MinimalUI({ ready }: { ready: boolean }) {
         warpVeilRef.current.style.opacity = String(w);
       }
 
-      const s =
-        Math.round(Math.max(experienceState.portalProgress, experienceState.travelProgress) * 1000) /
-        1000;
+      const s = Math.round(experienceState.scrollProgress * 1000) / 1000;
       if (s !== prevScale && filamentFillRef.current) {
         prevScale = s;
         filamentFillRef.current.style.transform = `scaleX(${s})`;
@@ -147,88 +67,80 @@ export function MinimalUI({ ready }: { ready: boolean }) {
     setSoundOn(active);
   };
 
+  const handleToggleLang = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    setLang((prev) => (prev === 'id' ? 'en' : 'id'));
+    soundEngine.triggerPartFocusSound();
+  };
+
   const handleSelectSeason = (e: React.MouseEvent<HTMLButtonElement>, id: SeasonId) => {
     e.stopPropagation();
     experienceState.setSeason(id);
     soundEngine.triggerSeasonChime(id);
   };
 
-  const handleReturnToUtsushiyo = (e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleDotClick = (e: React.MouseEvent<HTMLButtonElement>, idx: number) => {
     e.stopPropagation();
-    setWishModalOpen(false);
-    setActiveBlessing(null);
-    experienceState.selectLantern(null);
+    if (idx === 1) {
+      soundEngine.triggerTimberTransform(true);
+    } else if (idx === 7) {
+      soundEngine.triggerTimberTransform(false);
+    } else if (idx === 8) {
+      soundEngine.triggerDimensionalPulse();
+    } else {
+      soundEngine.triggerPartFocusSound();
+    }
+    experienceState.scrollToStage(idx);
+  };
+
+  const handleStartExplore = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    soundEngine.triggerTimberTransform(true);
+    experienceState.scrollToStage(1);
+  };
+
+  const handleWhatsAppClick = () => {
+    experienceState.triggerMessageCelebration();
+    soundEngine.triggerLanternBell(true);
+  };
+
+  const handleReturnToAssembly = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
     experienceState.returnToUtsushiyo();
     soundEngine.triggerDimensionalPulse();
   };
 
-  const handleOpenWishModal = (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.stopPropagation();
-    setActiveBlessing(null);
-    experienceState.selectLantern(null);
-    setWishModalOpen(true);
-  };
-
-  const handleReleaseWish = async (e: FormEvent) => {
-    e.preventDefault();
-    const trimmedWish = wishText.trim();
-    const displayWish =
-      trimmedWish.length > 0 ? trimmedWish : 'A silent prayer offered to the eternal sea';
-
-    const chosen =
-      OMIKUJI_BLESSINGS[
-        (experienceState.userLanternCount + displayWish.length) % OMIKUJI_BLESSINGS.length
-      ];
-
-    // Spawn 1 golden lantern in the spirit realm, overwriting oldest if 25 slots reached!
-    const { x: spawnedX, z: spawnedZ } = experienceState.spawnWishLantern(
-      displayWish,
-      chosen.rankKanji,
-      chosen.rankLabel,
-      chosen.verse,
-      status.season
-    );
-    soundEngine.triggerLanternBell(true);
-
-    setWishText('');
-    setDissolvingWish(displayWish);
-
-    // Silently persist wish into backend SQLite database (data/wishes.sqlite)
-    void saveWishToDatabase({
-      wish_text: displayWish,
-      season: status.season,
-      omikuji_rank: chosen.rankKanji,
-      omikuji_label: chosen.rankLabel,
-      omikuji_verse: chosen.verse,
-      pos_x: spawnedX,
-      pos_z: spawnedZ,
-    });
-
-    window.setTimeout(() => {
-      setDissolvingWish(null);
-      setActiveBlessing(chosen);
-    }, 1500);
-  };
-
   const isDarkAtmosphere =
     status.isToggledDark || status.portalStage >= 3 || status.isInsideKakuriyo;
-  const showDarkVerse =
-    status.isInsideKakuriyo && status.isToggledDark && !wishModalOpen && !status.selectedLantern;
-  const activeSeasonMeta = SEASONS.find((s) => s.id === status.season) || SEASONS[0];
+  const activeStage = SCROLL_STAGES[status.activeStageIndex] || SCROLL_STAGES[0];
+  const isAtHero = status.activeStageIndex === 0;
+  const isAtSanctuary =
+    status.activeStageIndex === SCROLL_STAGES.length - 1 && status.isInsideKakuriyo;
 
-  let whisperLabel = 'CLICK ONCE TO ENTER THE GATE';
-  if (status.isToggledDark) {
-    if (status.isInsideKakuriyo) {
-      whisperLabel =
-        status.activeLanternCount > 0
-          ? `DRAG LANTERN TO MOVE · TAP TO REVEAL PRAYER · ${status.activeLanternCount} DRIFTING`
-          : 'MAKE A WISH TO RELEASE A FLOATING LANTERN';
-    } else {
-      whisperLabel = 'CROSSING THE SACRED THRESHOLD';
-    }
-  } else if (status.isTransitioning) {
-    whisperLabel = 'RETURNING TO THE MORTAL SHORE';
+  let whisperLabel =
+    lang === 'id' ? 'GULIR KE BAWAH UNTUK MEMBEDAH ANATOMI' : 'SCROLL DOWN TO EXPLORE ANATOMY';
+
+  if (status.activeStageIndex >= 1 && status.activeStageIndex <= 6) {
+    whisperLabel =
+      lang === 'id' ? 'GULIR PERLAHAN UNTUK MELANJUTKAN' : 'SCROLL GENTLY TO CONTINUE';
+  } else if (status.activeStageIndex === 7) {
+    whisperLabel =
+      lang === 'id'
+        ? 'GULIR LAGI UNTUK MENEMBUS GERBANG MENUJU HOKORA'
+        : 'SCROLL FURTHER TO ENTER THE HOKORA SANCTUARY';
+  } else if (status.activeStageIndex === 8) {
+    whisperLabel =
+      lang === 'id'
+        ? 'GESER LENTERA DI ATAS AIR · KLIK TOMBOL UNTUK HUBUNGI WHATSAPP'
+        : 'DRAG LANTERNS ON THE WATER · CLICK BUTTON TO CHAT ON WHATSAPP';
   }
+
+  const waPrefill = encodeURIComponent(
+    lang === 'id'
+      ? 'Halo! Saya berkunjung dari website Itsukushima Torii dan ingin terhubung / berkolaborasi.'
+      : 'Hello! I am reaching out from the Itsukushima Torii website to connect / collaborate.'
+  );
+  const waUrl = `https://wa.me/62881026711738?text=${waPrefill}`;
 
   return (
     <div
@@ -240,12 +152,17 @@ export function MinimalUI({ ready }: { ready: boolean }) {
       <div ref={warpVeilRef} className="portal-warp-veil" />
 
       {/* Top-Left Minimalist Gold Emblem */}
-      <div className="ui-brand" aria-label="Itsukushima">
+      <div
+        className="ui-brand"
+        data-ui-interactive="true"
+        onClick={(e) => handleDotClick(e as unknown as React.MouseEvent<HTMLButtonElement>, 0)}
+        role="button"
+        tabIndex={0}
+        aria-label="Itsukushima"
+      >
         <span className="ui-kanji">厳島</span>
         <span className="ui-divider" />
-        <span className="ui-sub">
-          {status.isInsideKakuriyo ? 'KAKURIYO · HOKORA SANCTUARY' : 'ITSUKUSHIMA · UTSUSHIYO'}
-        </span>
+        <span className="ui-sub">ITSUKUSHIMA</span>
       </div>
 
       {/* Top-Center Pure Gold 4-Season Selector */}
@@ -270,168 +187,103 @@ export function MinimalUI({ ready }: { ready: boolean }) {
         })}
       </nav>
 
-      {/* Top-Right Minimal Sound Toggle */}
-      <button
-        type="button"
-        className={`ui-sound-btn ${soundOn ? 'is-active' : ''}`}
-        data-ui-interactive="true"
-        onClick={handleToggleSound}
-        aria-label={soundOn ? 'Mute ambient sound' : 'Enable ambient sound'}
-        title={soundOn ? 'Sound On' : 'Sound Off'}
-      >
-        <span className="sound-bars">
-          <i />
-          <i />
-          <i />
-          <i />
-        </span>
-      </button>
+      {/* Top-Right Minimal Controls: Language + Sound */}
+      <div className="ui-top-right" data-ui-interactive="true">
+        <button
+          type="button"
+          className="ui-lang-btn"
+          onClick={handleToggleLang}
+          title={lang === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'}
+        >
+          <span className={lang === 'id' ? 'is-active-lang' : ''}>ID</span>
+          <span className="lang-sep">/</span>
+          <span className={lang === 'en' ? 'is-active-lang' : ''}>EN</span>
+        </button>
 
-      {/* Dark-Mode Mystical Inscription inside Kakuriyo */}
-      <div
-        className={`dark-realm-verse ${showDarkVerse ? 'is-revealed' : ''}`}
-        aria-hidden={!showDarkVerse}
-      >
-        <span className="dark-realm-kanji">幽 世 の 祠</span>
-        <h1 className="dark-realm-title">
-          Beyond the veil of mist, the ancient Hokora guards every silent prayer.
-        </h1>
+        <button
+          type="button"
+          className={`ui-sound-btn ${soundOn ? 'is-active' : ''}`}
+          onClick={handleToggleSound}
+          aria-label={soundOn ? 'Mute ambient sound' : 'Enable ambient sound'}
+          title={soundOn ? 'Sound On' : 'Sound Off'}
+        >
+          <span className="sound-bars">
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+        </button>
       </div>
 
-      {/* Sacred Wish & Omikuji Modal Overlay (Single clean wish input, no name prompt, no public archive) */}
-      {wishModalOpen && (
-        <div
-          className="oracle-backdrop"
-          data-ui-interactive="true"
-          onClick={() => {
-            if (!dissolvingWish) {
-              setWishModalOpen(false);
-              setActiveBlessing(null);
-            }
-          }}
-        >
-          <div className="oracle-card" onClick={(e) => e.stopPropagation()}>
-            {dissolvingWish ? (
-              <div className="oracle-dissolve-stage">
-                <span className="oracle-eyebrow">奉 納 · OFFERING ASCENDING TO HOKORA</span>
-                <p className="oracle-dissolving-text">“{dissolvingWish}”</p>
-              </div>
-            ) : activeBlessing ? (
-              <div className="oracle-blessing-stage">
-                <span className="oracle-eyebrow">御 神 籤 · SACRED OMIKUJI</span>
-                <div className="oracle-rank-kanji">{activeBlessing.rankKanji}</div>
-                <div className="oracle-rank-sub">{activeBlessing.rankLabel}</div>
-                <p className="oracle-verse">“{activeBlessing.verse}”</p>
-                <p className="oracle-counsel">{activeBlessing.counsel}</p>
-                <div className="oracle-form-actions">
-                  <button
-                    type="button"
-                    className="oracle-submit-btn"
-                    onClick={() => {
-                      setWishModalOpen(false);
-                      setActiveBlessing(null);
-                    }}
-                  >
-                    RETURN TO SANCTUARY
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <form className="oracle-form" onSubmit={(e) => void handleReleaseWish(e)}>
-                <span className="oracle-eyebrow">末 社 奉 納 · HOKORA SHRINE OFFERING</span>
-                <h2 className="oracle-heading">Offer a Wish at the Hokora</h2>
-                <p className="oracle-desc">
-                  Offer your wish. A golden lantern will carry it into the eternal sea, and the shrine will answer with an Omikuji prophecy.
-                </p>
-                <input
-                  type="text"
-                  maxLength={140}
-                  value={wishText}
-                  onChange={(e) => setWishText(e.target.value)}
-                  placeholder="Write your wish or leave blank for a silent prayer..."
-                  className="oracle-input"
-                  autoFocus
-                />
-                <div className="oracle-form-actions">
-                  <button
-                    type="button"
-                    className="oracle-cancel-btn"
-                    onClick={() => setWishModalOpen(false)}
-                  >
-                    CANCEL
-                  </button>
-                  <button type="submit" className="oracle-submit-btn">
-                    RELEASE WISH
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Floating Lantern Prayer Inspection Modal (reveals the prayer carried by any clicked lantern) */}
-      {status.selectedLantern && !wishModalOpen && (
-        <div
-          className="oracle-backdrop"
-          data-ui-interactive="true"
-          onClick={() => experienceState.selectLantern(null)}
-        >
-          <div className="oracle-card lantern-prayer-card" onClick={(e) => e.stopPropagation()}>
-            <span className="oracle-eyebrow">流 燈 の 祈 り · PRAYER OF THE DRIFTING LANTERN</span>
-            <div className="prayer-quote-wrap">
-              <p className="prayer-text">“{status.selectedLantern.wishText}”</p>
-            </div>
-            {status.selectedLantern.omikujiRank && (
-              <div className="prayer-blessing-badge">
-                <span className="prayer-badge-kanji">{status.selectedLantern.omikujiRank}</span>
-                <span className="prayer-badge-label">{status.selectedLantern.omikujiLabel}</span>
-              </div>
-            )}
-            <div className="prayer-meta-line">
-              <span>Offered with reverence to the Hokora Sanctuary</span>
-            </div>
-            <div className="oracle-form-actions">
-              <button
-                type="button"
-                className="oracle-submit-btn"
-                onClick={() => experienceState.selectLantern(null)}
-              >
-                LET IT DRIFT
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bottom Pure Floating Caption & Ritual Actions */}
-      <div className="ui-bottom">
-        {status.isInsideKakuriyo && (
-          <div className="kakuriyo-actions" data-ui-interactive="true">
-            <button type="button" className="ritual-action-btn is-gold" onClick={handleOpenWishModal}>
-              <span>✦</span> MAKE A WISH · OMIKUJI
+      {/* Right-Edge Minimal Vertical Scroll Dots */}
+      <nav className="scroll-rail" data-ui-interactive="true" aria-label="Scroll Chapters">
+        {SCROLL_STAGES.map((st, idx) => {
+          const isActive = status.activeStageIndex === idx;
+          return (
+            <button
+              key={st.id}
+              type="button"
+              className={`rail-dot ${isActive ? 'is-active' : ''}`}
+              onClick={(e) => handleDotClick(e, idx)}
+              title={`${st.stepCode} · ${st.title[lang]}`}
+              aria-label={st.title[lang]}
+            >
+              <span className="rail-dot-pip" />
             </button>
-            <button type="button" className="ritual-action-btn" onClick={handleReturnToUtsushiyo}>
-              <span>⟲</span> RETURN THROUGH GATE
+          );
+        })}
+      </nav>
+
+      {/* Bottom Pure Floating Editorial Typography */}
+      <div className="ui-bottom">
+        {isAtSanctuary && (
+          <div className="kakuriyo-actions" data-ui-interactive="true">
+            <a
+              href={waUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ritual-action-btn is-gold"
+              onClick={handleWhatsAppClick}
+              title="Hubungi via WhatsApp (0881026711738)"
+            >
+              <span>✦</span>{' '}
+              {lang === 'id' ? 'GET IN TOUCH · WHATSAPP' : 'GET IN TOUCH · WHATSAPP'}
+            </a>
+            <button type="button" className="ritual-action-btn" onClick={handleReturnToAssembly}>
+              <span>↑</span> {lang === 'id' ? 'KEMBALI KE GERBANG' : 'RETURN TO GATE'}
             </button>
           </div>
         )}
 
-        <div className="ui-caption-group">
-          <div className="portal-indicator-wrap">
-            <div className="portal-filament-track">
-              <div ref={filamentFillRef} className="portal-filament-fill" />
-            </div>
-            <span className="portal-whisper">{whisperLabel}</span>
-          </div>
+        <div key={activeStage.id} className={`editorial-stage ${isAtHero ? 'is-hero' : ''}`}>
+          <span className="editorial-eyebrow">{activeStage.eyebrow[lang]}</span>
+          <h1 className="editorial-title">{activeStage.title[lang]}</h1>
+          <p className="editorial-caption">{activeStage.caption[lang]}</p>
 
-          <div className="ui-poetic-stack">
-            <p className="ui-poetic-line is-shown">
-              {isDarkAtmosphere
-                ? 'Where floating lanterns carry silent prayers to the ancient Hokora.'
-                : activeSeasonMeta.poetic}
-            </p>
+          {isAtHero && (
+            <button
+              type="button"
+              className="hero-explore-btn"
+              data-ui-interactive="true"
+              onClick={handleStartExplore}
+            >
+              <span>✦</span>
+              <span>
+                {lang === 'id'
+                  ? 'JELAJAHI RAHASIA ARSITEKTUR'
+                  : 'EXPLORE THE ARCHITECTURE'}
+              </span>
+              <span className="hero-arrow">↓</span>
+            </button>
+          )}
+        </div>
+
+        <div className="portal-indicator-wrap">
+          <div className="portal-filament-track">
+            <div ref={filamentFillRef} className="portal-filament-fill" />
           </div>
+          <span className="portal-whisper">{whisperLabel}</span>
         </div>
       </div>
     </div>

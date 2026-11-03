@@ -192,9 +192,14 @@ void main() {
 
   // Projective Planar Reflection UV + wave normal distortion (reflects Torii, Portal & Aurora!)
   vec2 projUv = vReflCoord.xy / max(0.0001, vReflCoord.w);
-  float distortScale = mix(0.30, 0.48, smoothstep(0.2, 1.0, uPortalProgress));
-  vec2 distortOffset = vec2(normal.x * 0.42, normal.z * 0.82) * distortScale;
-  vec2 reflUv = clamp(projUv + distortOffset, vec2(0.002), vec2(0.998));
+  float distortScale = mix(0.26, 0.42, smoothstep(0.2, 1.0, uPortalProgress));
+  vec2 distortOffset = vec2(normal.x * 0.36, normal.z * 0.52) * distortScale;
+
+  // Damp wave UV offset near screen boundaries so reflection UVs never stretch or clamp at edges
+  float edgeDamp = smoothstep(0.0, 0.08, projUv.x) * smoothstep(1.0, 0.92, projUv.x)
+                 * smoothstep(0.0, 0.08, projUv.y) * smoothstep(1.0, 0.92, projUv.y)
+                 * step(0.0, vReflCoord.w);
+  vec2 reflUv = clamp(projUv + distortOffset * edgeDamp, vec2(0.003), vec2(0.997));
 
   vec3 reflColor = texture2D(uReflectionMap, reflUv).rgb;
 
@@ -210,7 +215,7 @@ void main() {
   vec3 waterBody    = mix(waterDeep, waterShallow, smoothstep(6.0, 38.0, distCam) * 0.65);
 
   // Reflection of gate softens subtly in dark mode while Aurora & Portal reflections shine!
-  float reflClarity = mix(0.90, 0.56, smoothstep(0.35, 1.0, uPortalProgress));
+  float reflClarity = mix(0.90, 0.56, smoothstep(0.35, 1.0, uPortalProgress)) * step(0.0, vReflCoord.w);
   vec3 combinedCol = mix(waterBody, reflColor, clamp(fresnel * reflClarity, 0.0, 0.95));
 
   // Veiled Misty Sun / Oborozuki Spirit-Moon Specular Shimmer Path on the Waves!
@@ -287,7 +292,7 @@ export function InteractiveOcean() {
       ),
     []
   );
-  const clipPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.05), []);
+  const clipPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.65), []);
 
   const rippleUniformArray = useMemo(
     () => Array.from({ length: MAX_RIPPLES }, () => new THREE.Vector4(0, 1000, -100, 0)),
@@ -362,10 +367,9 @@ export function InteractiveOcean() {
     textureMatrix.multiply(virtualCam.projectionMatrix);
     textureMatrix.multiply(virtualCam.matrixWorldInverse);
 
-    // Interleaved reflection rendering (every 2nd frame) cuts heavy full-scene redraw pass by 50%!
-    // Wave animation still runs every frame in the fragment shader at full monitor refresh rate!
+    // Render reflection FBO cleanly every frame so camera movements & fades stay 100% locked in sync
     frameCountRef.current++;
-    if (frameCountRef.current % 2 === 0) {
+    {
       const prevTarget = gl.getRenderTarget();
       const prevLocalClip = gl.localClippingEnabled;
       const prevPlanes = gl.clippingPlanes;

@@ -125,10 +125,11 @@ function createWishDatabasePlugin(): Plugin {
 
       if (req.method === 'POST') {
         const body = await readJsonBody(req);
-        const authorName = 'Anonymous';
+        const rawAuthor = typeof body.author_name === 'string' ? body.author_name.trim() : '';
+        const authorName = (rawAuthor || 'Anonymous Visitor').slice(0, 80);
 
         const rawWish = typeof body.wish_text === 'string' ? body.wish_text.trim() : '';
-        const wishText = (rawWish || 'A silent prayer offered to the eternal sea').slice(0, 140);
+        const wishText = (rawWish || 'A silent message offered to the Hokora sanctuary').slice(0, 240);
 
         const season =
           typeof body.season === 'string' && ['haru', 'natsu', 'aki', 'fuyu'].includes(body.season)

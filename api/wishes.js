@@ -38,8 +38,10 @@ export default async function handler(req, res) {
 
       if (req.method === 'POST') {
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+        const rawAuthor = typeof body.author_name === 'string' ? body.author_name.trim() : '';
+        const authorName = (rawAuthor || 'Anonymous Visitor').slice(0, 80);
         const rawWish = typeof body.wish_text === 'string' ? body.wish_text.trim() : '';
-        const wishText = (rawWish || 'A silent prayer offered to the eternal sea').slice(0, 140);
+        const wishText = (rawWish || 'A silent message offered to the Hokora sanctuary').slice(0, 240);
         const season = body.season || 'haru';
         const omikujiRank = body.omikuji_rank || '吉';
         const omikujiLabel = body.omikuji_label || 'KICHI · AUSPICIOUS TIDE';
@@ -51,7 +53,7 @@ export default async function handler(req, res) {
 
         const wishItem = {
           id,
-          author_name: 'Anonymous',
+          author_name: authorName,
           wish_text: wishText,
           season,
           omikuji_rank: omikujiRank,

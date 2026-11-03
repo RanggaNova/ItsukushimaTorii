@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { experienceState, HOKORA_SANCTUARY_Z } from '../state/experienceState';
+import { SCROLL_STAGES } from '../data/toriiPartsData';
 import { soundEngine } from '../audio/SoundEngine';
 
 const SEA_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -11,6 +12,9 @@ export function CameraRig() {
   const mathRaycaster = useMemo(() => new THREE.Raycaster(), []);
   const waterIntersectPt = useMemo(() => new THREE.Vector3(), []);
   const dynamicTarget = useMemo(() => new THREE.Vector3(0, 2.55, 0), []);
+  const smoothedCam = useMemo(() => new THREE.Vector3(0.0, 2.65, 19.5), []);
+  const smoothedLook = useMemo(() => new THREE.Vector3(0.0, 2.55, 0.0), []);
+  const orbitOffset = useMemo(() => new THREE.Vector3(), []);
 
   useEffect(() => {
     experienceState.cameraRef = camera;
@@ -53,8 +57,7 @@ export function CameraRig() {
         experienceState.hasWaterHit = false;
       }
 
-      // Check hover over floating lanterns in Kakuriyo to provide intuitive pointer cursor
-      if (experienceState.travelProgress > 0.78 && experienceState.isPortalOpenTarget) {
+      if (experienceState.travelProgress > 0.72 && experienceState.isPortalOpenTarget) {
         if (experienceState.draggedLantern) {
           document.body.style.cursor = 'grabbing';
           return;
@@ -94,65 +97,100 @@ export function CameraRig() {
   }, [camera, mathRaycaster, waterIntersectPt]);
 
   useFrame(({ clock }, delta) => {
+    const dt = Math.min(delta, 0.05);
     const t = clock.getElapsedTime();
 
-    experienceState.step(delta, t);
+    experienceState.step(dt, t);
     soundEngine.update(
       experienceState.portalProgress,
       experienceState.gateHoverBlend,
       experienceState.cursorWaterSpeed
     );
 
-    // Fixed front-centered composition (NO cursor rotation!), with seamless Dolly-Through flight
     const aspect = size.width / Math.max(1, size.height);
     const isPortrait = aspect < 1.15;
-    const outerBaseZ = aspect < 1.2 ? 19.5 / Math.max(0.50, aspect * 0.85) : 19.5;
 
-    // Responsive Kakuriyo Sanctuary framing:
-    // On portrait mobile (aspect ~0.40 - 0.75), pull camera back away from Hokora (-20.2)
-    // and elevate slightly with downward pitch so the wide water expanse & floating lanterns
-    // are framed prominently in the lower-middle screen, well above the bottom buttons.
+    const s = experienceState.scrollProgress;
+    const stageIdx = experienceState.activeStageIndex;
+    const stage = SCROLL_STAGES[stageIdx] || SCROLL_STAGES[0];
+
+    const span = Math.max(0.0001, stage.range[1] - stage.range[0]);
+    const rawLocalU = THREE.MathUtils.clamp((s - stage.range[0]) / span, 0, 1);
+    const localU = rawLocalU * rawLocalU * (3.0 - 2.0 * rawLocalU);
+
+    const cStart = isPortrait ? stage.camStartPortrait : stage.camStart;
+    const cEnd = isPortrait ? stage.camEndPortrait : stage.camEnd;
+    const lStart = isPortrait ? stage.lookStartPortrait : stage.lookStart;
+    const lEnd = isPortrait ? stage.lookEndPortrait : stage.lookEnd;
+
+    // For Stage 6 (Sanctuary arrival), compute responsive portrait distance from Hokora
     const portraitFactor = isPortrait ? Math.min(1.85, 0.95 / Math.max(0.38, aspect)) : 1.0;
-    const innerSanctuaryZ = HOKORA_SANCTUARY_Z + 9.7 * portraitFactor;
-    const innerCamY = isPortrait ? 2.42 : 1.82;
-    const innerTargetY = isPortrait ? 1.30 : 1.42;
+    const endZOverride =
+      stage.id === 'sanctuary' ? HOKORA_SANCTUARY_Z + 9.7 * portraitFactor : cEnd[2];
 
-    const u = experienceState.travelProgress;
-    // Cubic smoothstep S-curve for buttery dolly-in & dolly-back
-    const ease = u * u * (3.0 - 2.0 * u);
+    const targetCamX = THREE.MathUtils.lerp(cStart[0], cEnd[0], localU);
+    const targetCamY = THREE.MathUtils.lerp(cStart[1], cEnd[1], localU);
+    const targetCamZ = THREE.MathUtils.lerp(cStart[2], endZOverride, localU);
+
+    const targetLookX = THREE.MathUtils.lerp(lStart[0], lEnd[0], localU);
+    const targetLookY = THREE.MathUtils.lerp(lStart[1], lEnd[1], localU);
+    const targetLookZ = THREE.MathUtils.lerp(lStart[2], lEnd[2], localU);
+
+    const camLambda = 2.8;
+    smoothedCam.x = THREE.MathUtils.damp(smoothedCam.x, targetCamX, camLambda, dt);
+    smoothedCam.y = THREE.MathUtils.damp(smoothedCam.y, targetCamY, camLambda, dt);
+    smoothedCam.z = THREE.MathUtils.damp(smoothedCam.z, targetCamZ, camLambda, dt);
+
+    smoothedLook.x = THREE.MathUtils.damp(smoothedLook.x, targetLookX, camLambda, dt);
+    smoothedLook.y = THREE.MathUtils.damp(smoothedLook.y, targetLookY, camLambda, dt);
+    smoothedLook.z = THREE.MathUtils.damp(smoothedLook.z, targetLookZ, camLambda, dt);
+
+    // Subtle user drag orbit when in Utsushiyo (fades out automatically during Sanctuary flight)
+    const orbitWeight = 1.0 - experienceState.travelProgress;
+    orbitOffset.copy(smoothedCam).sub(smoothedLook);
+    const radius = orbitOffset.length();
+    const baseAzimuth = Math.atan2(orbitOffset.x, orbitOffset.z);
+    const baseElevation = Math.asin(
+      THREE.MathUtils.clamp(orbitOffset.y / Math.max(0.001, radius), -0.95, 0.95)
+    );
+
+    const finalAzimuth = baseAzimuth + experienceState.orbitAzimuth * orbitWeight;
+    const finalElevation = THREE.MathUtils.clamp(
+      baseElevation + experienceState.orbitElevation * orbitWeight,
+      0.02,
+      0.65
+    );
 
     const shock = experienceState.clickShockwave;
-    const breatheY = Math.sin(t * 0.38) * 0.022;
+    const breatheY = Math.sin(t * 0.42) * 0.02;
 
-    const camZ = THREE.MathUtils.lerp(outerBaseZ, innerSanctuaryZ, ease) - shock * 0.45 * (1.0 - ease);
-    const camY = THREE.MathUtils.lerp(2.65, innerCamY, ease) + breatheY;
+    const finalCamX =
+      smoothedLook.x + radius * Math.cos(finalElevation) * Math.sin(finalAzimuth);
+    const finalCamY =
+      Math.max(0.58, smoothedLook.y + radius * Math.sin(finalElevation)) + breatheY;
+    const finalCamZ =
+      smoothedLook.z +
+      radius * Math.cos(finalElevation) * Math.cos(finalAzimuth) -
+      shock * 0.35 * orbitWeight;
 
-    // Exact dimensional threshold warp intensity right as camera crosses the portal plane (z = 0)
-    if (u > 0.01 && u < 0.99) {
-      experienceState.warpIntensity = Math.exp(-Math.pow(camZ / 2.25, 2.0));
+    // Dimensional threshold warp right as camera crosses the portal plane (z = 0)
+    if (experienceState.travelProgress > 0.02 && experienceState.travelProgress < 0.98) {
+      experienceState.warpIntensity = Math.exp(-Math.pow(finalCamZ / 2.25, 2.0));
     } else {
-      experienceState.warpIntensity *= Math.exp(-10.0 * Math.min(delta, 0.05));
+      experienceState.warpIntensity *= Math.exp(-10.0 * dt);
     }
 
-    camera.position.set(0, camY, camZ);
+    camera.position.set(finalCamX, finalCamY, finalCamZ);
 
     const persp = camera as THREE.PerspectiveCamera;
     const baseFov = isPortrait ? 46.0 : 42.0;
-    const targetFov = baseFov + experienceState.warpIntensity * 6.5 + shock * 2.4;
+    const targetFov = baseFov + experienceState.warpIntensity * 6.5 + shock * 2.2;
     if (Math.abs(persp.fov - targetFov) > 0.01) {
       persp.fov = THREE.MathUtils.lerp(persp.fov, targetFov, 0.14);
       persp.updateProjectionMatrix();
     }
 
-    // Look straight ahead (-Z) throughout the entire flight:
-    // At Utsushiyo -> frames Torii (0, 2.55, 0)
-    // At Kakuriyo  -> frames grounded Hokora Shrine & Eternal Lantern Sea (0, innerTargetY, -20.2)
-    dynamicTarget.set(
-      0,
-      THREE.MathUtils.lerp(2.55, innerTargetY, ease),
-      THREE.MathUtils.lerp(0.0, -20.2, ease)
-    );
-
+    dynamicTarget.copy(smoothedLook);
     camera.up.set(0, 1, 0);
     camera.lookAt(dynamicTarget);
   });

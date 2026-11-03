@@ -14,6 +14,7 @@ export interface WishLanternSlot {
 }
 
 export interface CreateWishPayload {
+  author_name?: string;
   wish_text: string;
   season: SeasonId;
   omikuji_rank: string;
@@ -98,7 +99,7 @@ export async function saveWishToDatabase(
     };
     const savedWish: WishLanternSlot = data.wish ?? {
       id: Date.now(),
-      author_name: 'Anonymous',
+      author_name: payload.author_name || 'Anonymous Visitor',
       wish_text: payload.wish_text,
       season: payload.season,
       omikuji_rank: payload.omikuji_rank,
@@ -117,7 +118,7 @@ export async function saveWishToDatabase(
     const existing = readFallbackRecords();
     const fallbackSlot: WishLanternSlot = {
       id: Date.now(),
-      author_name: 'Anonymous',
+      author_name: payload.author_name || 'Anonymous Visitor',
       wish_text: payload.wish_text,
       season: payload.season,
       omikuji_rank: payload.omikuji_rank,

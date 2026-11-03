@@ -17,7 +17,7 @@ varying vec3 vWorldPos;
 varying vec3 vNormalW;
 
 void main() {
-  vHeight = position.y;
+  vHeight = max(-0.2, position.y);
   vLayer = aLayer;
   vRidge = aRidge;
   vNormalW = normalize(mat3(modelMatrix) * normal);
@@ -582,9 +582,11 @@ function buildMountainRangesGeometry(): THREE.BufferGeometry {
 
         // Carve deep eroded river gorges while pushing ridge crests into sharp alpine peaks!
         const sculptedFactor = Math.pow(combinedRelief, 1.35);
-        const y =
-          cfg.maxH * arcEnvelope * centerChannelMask * crossEnvelope * (0.18 + 0.95 * sculptedFactor) -
-          0.55;
+        const isSkirtEdge = r === 0 || r === radialRows;
+        const y = isSkirtEdge
+          ? -12.5
+          : cfg.maxH * arcEnvelope * centerChannelMask * crossEnvelope * (0.18 + 0.95 * sculptedFactor) -
+            0.55;
 
         const ridgeAttr = THREE.MathUtils.clamp(
           (1.0 - distSpine * 0.65) * (0.45 * mainRidged + 0.55 * lateralSpurs),

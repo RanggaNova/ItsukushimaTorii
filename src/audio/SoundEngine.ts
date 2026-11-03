@@ -256,6 +256,53 @@ class SoundEngine {
       osc.stop(t0 + 3.3);
     });
   }
+
+  public triggerTimberTransform(isDisassembling: boolean) {
+    if (!this.initialized || !this.enabled || !this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    // Staggered sequence of 4 deep Kigumi wood-lock thuds + harmonic resonance
+    const steps = isDisassembling ? [145, 180, 220, 265] : [260, 205, 150, 92];
+    steps.forEach((baseFreq, idx) => {
+      if (!this.ctx || !this.masterGain) return;
+      const t0 = now + idx * 0.14;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(baseFreq, t0);
+      osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.42, t0 + 0.24);
+
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(0.22, t0 + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.28);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(t0);
+      osc.stop(t0 + 0.30);
+    });
+  }
+
+  public triggerPartFocusSound() {
+    if (!this.initialized || !this.enabled || !this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    // Crisp hyōshigi wooden clack + soft harmonic overtone
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.exponentialRampToValueAtTime(293.66, now + 0.12);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.11, now + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.35);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.38);
+  }
 }
 
 export const soundEngine = new SoundEngine();
